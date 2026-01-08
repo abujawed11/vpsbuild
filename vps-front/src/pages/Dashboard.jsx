@@ -15,6 +15,12 @@ export default function Dashboard() {
     const [analyzing, setAnalyzing] = useState(false);
     const [selectedProject, setSelectedProject] = useState(null);
 
+    // Branch selection state
+    const [repoSelection, setRepoSelection] = useState(null); // The repo being configured
+    const [branches, setBranches] = useState([]);
+    const [loadingBranches, setLoadingBranches] = useState(false);
+    const [selectedBranch, setSelectedBranch] = useState("");
+
     const fetchRepos = async () => {
         setLoadingRepos(true);
         setRepoError("");
@@ -29,19 +35,47 @@ export default function Dashboard() {
         }
     };
 
-    const selectRepo = async (repo) => {
-        setAnalyzing(true);
+    const initiateSelection = async (repo) => {
+        setRepoSelection(repo);
         setSelectedProject(null);
+        setBranches([]);
+        setLoadingBranches(true);
+        
+        try {
+            const token = getToken();
+            const data = await apiFetch(`/api/github/branches?repo=${repo.full_name}`, { token });
+            setBranches(data.branches);
+            
+            // Auto-select default branch
+            const def = data.branches.find(b => b.name === repo.default_branch) || data.branches[0];
+            setSelectedBranch(def?.name || "main");
+        } catch (e) {
+            alert("Failed to fetch branches: " + e.message);
+            setRepoSelection(null); // Reset on error
+        } finally {
+            setLoadingBranches(false);
+        }
+    };
+
+    const confirmSelection = async () => {
+        if (!repoSelection || !selectedBranch) return;
+
+        setAnalyzing(true);
         try {
             const token = getToken();
             const res = await apiFetch("/api/projects/import", {
                 method: "POST",
                 token,
-                body: { repoFullName: repo.full_name, repoId: repo.id }
+                body: { 
+                    repoFullName: repoSelection.full_name, 
+                    repoId: repoSelection.id,
+                    branch: selectedBranch 
+                }
             });
             setSelectedProject(res.project);
+            setRepoSelection(null); // Clear selection mode
         } catch (e) {
-            alert("Failed to select repo: " + e.message);
+            alert("Failed to analyze repo: " + e.message);
         } finally {
             setAnalyzing(false);
         }
@@ -106,7 +140,7 @@ export default function Dashboard() {
                                 </button>
                                 {repoError && <p style={{ color: "crimson" }}>{repoError}</p>}
 
-                                {repos && (
+                                {repos && !repoSelection && !selectedProject && (
                                     <div style={{ marginTop: 12 }}>
                                         <h4>Repositories ({repos.length})</h4>
                                         <ul style={{ maxHeight: 300, overflowY: "auto", paddingLeft: 20 }}>
@@ -115,11 +149,10 @@ export default function Dashboard() {
                                                     <b>{r.full_name}</b>
                                                     {r.private ? " 🔒" : ""}
                                                     <button 
-                                                        onClick={() => selectRepo(r)} 
-                                                        disabled={analyzing}
+                                                        onClick={() => initiateSelection(r)} 
                                                         style={{ marginLeft: 10, fontSize: "0.8em" }}
                                                     >
-                                                        {analyzing ? "..." : "Select & Analyze"}
+                                                        Select
                                                     </button>
                                                 </li>
                                             ))}
@@ -127,8 +160,44 @@ export default function Dashboard() {
                                     </div>
                                 )}
 
-                                {analyzing && <p>🔍 Analyzing repository structure...</p>}
+                                {/* Branch Selection Mode */}
+                                {repoSelection && (
+                                    <div style={{ marginTop: 20, padding: 12, border: "1px solid #aaa", borderRadius: 8, background: "#f9f9f9" }}>
+                                        <h3 style={{ marginTop: 0 }}>Configure: {repoSelection.full_name}</h3>
+                                        
+                                        {loadingBranches ? (
+                                            <p>Loading branches...</p>
+                                        ) : (
+                                            <div>
+                                                <label style={{ display: "block", marginBottom: 8 }}>
+                                                    Select Branch:
+                                                    <select 
+                                                        value={selectedBranch} 
+                                                        onChange={(e) => setSelectedBranch(e.target.value)}
+                                                        style={{ marginLeft: 10, padding: 4 }}
+                                                    >
+                                                        {branches.map(b => (
+                                                            <option key={b.name} value={b.name}>
+                                                                {b.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </label>
+
+                                                <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+                                                    <button onClick={confirmSelection} disabled={analyzing}>
+                                                        {analyzing ? "Analyzing..." : "Analyze & Import"}
+                                                    </button>
+                                                    <button onClick={() => setRepoSelection(null)} disabled={analyzing} style={{ background: "#ccc" }}>
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 
+                                {/* Result */}
                                 {selectedProject && (
                                     <div style={{ marginTop: 20, padding: 12, border: "2px solid #4CAF50", borderRadius: 8 }}>
                                         <h3 style={{ margin: "0 0 10px 0" }}>Project Ready 🚀</h3>
@@ -138,6 +207,12 @@ export default function Dashboard() {
                                         <div style={{ marginTop: 10, color: "#666" }}>
                                             Next step: Generate Dockerfile & Deploy (Coming soon)
                                         </div>
+                                        <button 
+                                            onClick={() => setSelectedProject(null)} 
+                                            style={{ marginTop: 12, fontSize: "0.8em" }}
+                                        >
+                                            Select Another
+                                        </button>
                                     </div>
                                 )}
                             </div>

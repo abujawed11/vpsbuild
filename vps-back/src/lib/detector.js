@@ -4,13 +4,14 @@ const axios = require("axios");
  * Analyzes repository files to detect the framework.
  * @param {string} repoFullName - e.g. "user/repo"
  * @param {string} token - GitHub Access Token
+ * @param {string} branch - Branch to check (default: main)
  * @returns {Promise<string>} - Detected framework (e.g. "react-vite", "node", "python", "static", "unknown")
  */
-async function detectFramework(repoFullName, token) {
+async function detectFramework(repoFullName, token, branch = "main") {
   try {
     // 1. Fetch root file list
     const { data: files } = await axios.get(
-      `https://api.github.com/repos/${repoFullName}/contents`,
+      `https://api.github.com/repos/${repoFullName}/contents?ref=${branch}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 

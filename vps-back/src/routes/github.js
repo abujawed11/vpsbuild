@@ -104,4 +104,35 @@ router.get("/repos", authRequired, async (req, res) => {
   }
 });
 
+// 4) List branches for a repo
+router.get("/branches", authRequired, async (req, res) => {
+  const { repo } = req.query; // e.g. "facebook/react"
+  if (!repo) return res.status(400).json({ error: "Missing repo param" });
+
+  try {
+    const account = await prisma.githubAccount.findUnique({
+      where: { userId: req.user.id }
+    });
+
+    if (!account) {
+      return res.status(400).json({ error: "No GitHub account connected" });
+    }
+
+    // Fetch branches (max 100)
+    const { data } = await axios.get(`https://api.github.com/repos/${repo}/branches?per_page=100`, {
+      headers: { Authorization: `Bearer ${account.accessToken}` }
+    });
+
+    const branches = data.map((b) => ({
+      name: b.name,
+      protected: b.protected
+    }));
+
+    res.json({ branches });
+  } catch (err) {
+    console.error("GitHub branches error:", err.message);
+    res.status(500).json({ error: "Failed to fetch branches" });
+  }
+});
+
 module.exports = router;

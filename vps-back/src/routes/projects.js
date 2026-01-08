@@ -7,9 +7,9 @@ const { detectFramework } = require("../lib/detector");
 const router = express.Router();
 
 // POST /api/projects/import
-// Input: { repoFullName: "user/repo", repoId: 12345 }
+// Input: { repoFullName: "user/repo", repoId: 12345, branch: "main" }
 router.post("/import", authRequired, async (req, res) => {
-  const { repoFullName, repoId } = req.body;
+  const { repoFullName, repoId, branch } = req.body;
 
   if (!repoFullName) {
     return res.status(400).json({ error: "Missing repoFullName" });
@@ -25,16 +25,16 @@ router.post("/import", authRequired, async (req, res) => {
       return res.status(400).json({ error: "GitHub account not connected" });
     }
 
-    // 2. Fetch Repo Details (Branch, Private, etc)
+    // 2. Fetch Repo Details (for default branch fallback)
     const { data: repoInfo } = await axios.get(
       `https://api.github.com/repos/${repoFullName}`,
       { headers: { Authorization: `Bearer ${account.accessToken}` } }
     );
 
-    const defaultBranch = repoInfo.default_branch || "main";
+    const targetBranch = branch || repoInfo.default_branch || "main";
 
-    // 3. Detect Framework
-    const detectedType = await detectFramework(repoFullName, account.accessToken);
+    // 3. Detect Framework (pass branch!)
+    const detectedType = await detectFramework(repoFullName, account.accessToken, targetBranch);
 
     // 4. Save to Database
     // Use repo name as project name (ensure uniqueness for user)
@@ -49,14 +49,14 @@ router.post("/import", authRequired, async (req, res) => {
       },
       update: {
         repoFullName,
-        branch: defaultBranch,
+        branch: targetBranch,
         framework: detectedType,
       },
       create: {
         userId: req.user.id,
         name: name,
         repoFullName,
-        branch: defaultBranch,
+        branch: targetBranch,
         framework: detectedType,
       },
     });
