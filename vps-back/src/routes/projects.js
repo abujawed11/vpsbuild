@@ -2,9 +2,67 @@ const express = require("express");
 const axios = require("axios");
 const { prisma } = require("../db/prisma");
 const { authRequired } = require("../middleware/auth");
+const path = require("path");
 const { detectFramework } = require("../lib/detector");
+const { cloneRepo } = require("../lib/git");
 
 const router = express.Router();
+
+// POST /api/projects/clone
+router.post("/clone", authRequired, async (req, res) => {
+  const { projectId } = req.body;
+  if (!projectId) return res.status(400).json({ error: "Missing projectId" });
+
+  try {
+    const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        include: { user: { include: { github: true } } }
+    });
+
+    if (!project || project.userId !== req.user.id) {
+        return res.status(404).json({ error: "Project not found" });
+    }
+
+    const token = project.user.github?.accessToken;
+    if (!token) return res.status(400).json({ error: "GitHub token missing" });
+
+    // Define workspace path
+    // vps-back/workspaces/<userId>/<projectName>
+    const workspaceRoot = process.env.WORKSPACE_ROOT || path.join(__dirname, "../../workspaces");
+    const targetDir = path.join(workspaceRoot, req.user.id, project.name);
+
+    // Update status to pending
+    await prisma.project.update({
+        where: { id: projectId },
+        data: { cloneStatus: "PENDING" }
+    });
+
+    // Perform Clone
+    await cloneRepo(project.repoFullName, project.branch, token, targetDir);
+
+    // Update DB on success
+    const updated = await prisma.project.update({
+        where: { id: projectId },
+        data: { 
+            workspacePath: targetDir,
+            cloneStatus: "CLONED"
+        }
+    });
+
+    res.json({ success: true, project: updated });
+
+  } catch (err) {
+    console.error("Clone route error:", err.message);
+    
+    // Update DB on failure
+    await prisma.project.update({
+        where: { id: projectId },
+        data: { cloneStatus: "FAILED" }
+    });
+
+    res.status(500).json({ error: "Failed to clone repository" });
+  }
+});
 
 // POST /api/projects/import
 // Input: { repoFullName: "user/repo", repoId: 12345, branch: "main" }

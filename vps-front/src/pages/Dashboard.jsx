@@ -20,6 +20,7 @@ export default function Dashboard() {
     const [branches, setBranches] = useState([]);
     const [loadingBranches, setLoadingBranches] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState("");
+    const [cloning, setCloning] = useState(false);
 
     const fetchRepos = async () => {
         setLoadingRepos(true);
@@ -32,6 +33,24 @@ export default function Dashboard() {
             setRepoError(e.message);
         } finally {
             setLoadingRepos(false);
+        }
+    };
+
+    const cloneProject = async () => {
+        if (!selectedProject) return;
+        setCloning(true);
+        try {
+            const token = getToken();
+            const res = await apiFetch("/api/projects/clone", {
+                method: "POST",
+                token,
+                body: { projectId: selectedProject.id }
+            });
+            setSelectedProject(res.project);
+        } catch (e) {
+            alert("Cloning failed: " + e.message);
+        } finally {
+            setCloning(false);
         }
     };
 
@@ -204,12 +223,36 @@ export default function Dashboard() {
                                         <div><b>Repo:</b> {selectedProject.repoFullName}</div>
                                         <div><b>Branch:</b> {selectedProject.branch}</div>
                                         <div><b>Detected Framework:</b> {selectedProject.framework}</div>
-                                        <div style={{ marginTop: 10, color: "#666" }}>
-                                            Next step: Generate Dockerfile & Deploy (Coming soon)
-                                        </div>
+                                        
+                                        <hr style={{ margin: "12px 0", border: "0", borderTop: "1px solid #eee" }} />
+
+                                        {/* Cloning Section */}
+                                        {selectedProject.cloneStatus === "CLONED" ? (
+                                            <div>
+                                                <div style={{ color: "green", fontWeight: "bold" }}>Workspace Ready ✅</div>
+                                                <div style={{ marginTop: 10, color: "#666" }}>
+                                                    Next step: Generate Dockerfile & Deploy (Coming soon)
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <p style={{ marginBottom: 10 }}>Workspace not prepared.</p>
+                                                <button 
+                                                    onClick={cloneProject} 
+                                                    disabled={cloning}
+                                                    style={{ background: "#007BFF", color: "white" }}
+                                                >
+                                                    {cloning ? "Cloning Repository..." : "Prepare Workspace (Clone)"}
+                                                </button>
+                                                {selectedProject.cloneStatus === "FAILED" && (
+                                                    <p style={{ color: "red", marginTop: 5 }}>Last clone attempt failed.</p>
+                                                )}
+                                            </div>
+                                        )}
+
                                         <button 
                                             onClick={() => setSelectedProject(null)} 
-                                            style={{ marginTop: 12, fontSize: "0.8em" }}
+                                            style={{ marginTop: 12, fontSize: "0.8em", background: "none", color: "#666", border: "none", textDecoration: "underline", cursor: "pointer" }}
                                         >
                                             Select Another
                                         </button>
