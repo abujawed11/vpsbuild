@@ -6,8 +6,54 @@ const path = require("path");
 const { detectFramework } = require("../lib/detector");
 const { cloneRepo } = require("../lib/git");
 const { analyzeWorkspace } = require("../lib/analyzer");
+const { scanWorkspaceForRoots } = require("../lib/file-utils");
 
 const router = express.Router();
+
+// GET /api/projects/:id/tree
+router.get("/:id/tree", authRequired, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const project = await prisma.project.findUnique({ where: { id } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+        if (!project.workspacePath) {
+            return res.status(400).json({ error: "Workspace not ready" });
+        }
+
+        const tree = await scanWorkspaceForRoots(project.workspacePath);
+        res.json({ tree });
+    } catch (err) {
+        console.error("Tree scan error:", err.message);
+        res.status(500).json({ error: "Failed to scan workspace" });
+    }
+});
+
+// POST /api/projects/:id/roots
+router.post("/:id/roots", authRequired, async (req, res) => {
+    const { id } = req.params;
+    const { frontendRoot, backendRoot } = req.body; // paths relative to workspace
+
+    try {
+        const project = await prisma.project.findUnique({ where: { id } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        // TODO: Validate paths exist? For now, trust the UI/User.
+        
+        const updated = await prisma.project.update({
+            where: { id },
+            data: { frontendRoot, backendRoot }
+        });
+
+        res.json({ success: true, project: updated });
+    } catch (err) {
+        console.error("Save roots error:", err.message);
+        res.status(500).json({ error: "Failed to save folder config" });
+    }
+});
 
 // POST /api/projects/analyze
 router.post("/analyze", authRequired, async (req, res) => {
@@ -27,8 +73,18 @@ router.post("/analyze", authRequired, async (req, res) => {
         return res.status(400).json({ error: "Project not cloned yet" });
     }
 
+    // Determine which folder to analyze
+    // If backendRoot is set, prioritize it (server usually drives the app)
+    // If frontendRoot is set and no backendRoot, use that (static/SPA deploy)
+    let targetRelativePath = "";
+    if (project.backendRoot) {
+        targetRelativePath = project.backendRoot;
+    } else if (project.frontendRoot) {
+        targetRelativePath = project.frontendRoot;
+    }
+
     // Perform Analysis
-    const config = await analyzeWorkspace(project.workspacePath);
+    const config = await analyzeWorkspace(project.workspacePath, targetRelativePath);
 
     // Update DB
     const updated = await prisma.project.update({
@@ -41,7 +97,7 @@ router.post("/analyze", authRequired, async (req, res) => {
             buildCommand: config.buildCommand,
             startCommand: config.startCommand,
             outputDir: config.outputDir,
-            port: config.port
+            port: parseInt(config.port, 10) || 3000
         }
     });
 

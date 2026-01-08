@@ -1,7 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 
-async function analyzeWorkspace(workspacePath) {
+async function analyzeWorkspace(basePath, relativePath = "") {
+  const targetPath = path.join(basePath, relativePath);
+  
   const config = {
     runtime: "unknown",
     framework: "unknown",
@@ -12,13 +14,13 @@ async function analyzeWorkspace(workspacePath) {
     port: 3000
   };
 
-  const files = await fs.promises.readdir(workspacePath);
+  const files = await fs.promises.readdir(targetPath);
   const hasFile = (f) => files.includes(f);
 
   // 1. Check for Node.js
   if (hasFile("package.json")) {
     config.runtime = "node";
-    const pkg = JSON.parse(await fs.promises.readFile(path.join(workspacePath, "package.json"), "utf8"));
+    const pkg = JSON.parse(await fs.promises.readFile(path.join(targetPath, "package.json"), "utf8"));
     const scripts = pkg.scripts || {};
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 

@@ -43,6 +43,8 @@ model Project {
   
   // Workspace info
   workspacePath    String?  // Absolute path on backend
+  frontendRoot     String?  // Relative path to workspace root
+  backendRoot      String?  // Relative path to workspace root
   cloneStatus      String   @default("PENDING") // PENDING, CLONED, FAILED
 
   // Analysis / Build Config
