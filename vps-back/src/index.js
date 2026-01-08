@@ -3,6 +3,7 @@ const cors = require("cors");
 require("dotenv").config();
 const morgan = require("morgan");
 const githubRoutes = require("./routes/github");
+const projectsRoutes = require("./routes/projects");
 
 const authRoutes = require("./routes/auth");
 const meRoutes = require("./routes/me");
@@ -22,6 +23,7 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 app.use("/api/auth", authRoutes);
 app.use("/api/me", meRoutes);
 app.use("/api/github", githubRoutes);
+app.use("/api/projects", projectsRoutes);
 
 const port = Number(process.env.PORT || 5000);
 app.listen(port, () => console.log(`API running on http://localhost:${port}`));

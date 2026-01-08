@@ -10,6 +10,10 @@ export default function Dashboard() {
     const [repos, setRepos] = useState(null);
     const [loadingRepos, setLoadingRepos] = useState(false);
     const [repoError, setRepoError] = useState("");
+    
+    // New state for selection
+    const [analyzing, setAnalyzing] = useState(false);
+    const [selectedProject, setSelectedProject] = useState(null);
 
     const fetchRepos = async () => {
         setLoadingRepos(true);
@@ -22,6 +26,24 @@ export default function Dashboard() {
             setRepoError(e.message);
         } finally {
             setLoadingRepos(false);
+        }
+    };
+
+    const selectRepo = async (repo) => {
+        setAnalyzing(true);
+        setSelectedProject(null);
+        try {
+            const token = getToken();
+            const res = await apiFetch("/api/projects/import", {
+                method: "POST",
+                token,
+                body: { repoFullName: repo.full_name, repoId: repo.id }
+            });
+            setSelectedProject(res.project);
+        } catch (e) {
+            alert("Failed to select repo: " + e.message);
+        } finally {
+            setAnalyzing(false);
         }
     };
 
@@ -89,14 +111,33 @@ export default function Dashboard() {
                                         <h4>Repositories ({repos.length})</h4>
                                         <ul style={{ maxHeight: 300, overflowY: "auto", paddingLeft: 20 }}>
                                             {repos.map((r) => (
-                                                <li key={r.id}>
-                                                    <a href={r.html_url} target="_blank" rel="noreferrer">
-                                                        {r.full_name}
-                                                    </a>
+                                                <li key={r.id} style={{ marginBottom: 6 }}>
+                                                    <b>{r.full_name}</b>
                                                     {r.private ? " 🔒" : ""}
+                                                    <button 
+                                                        onClick={() => selectRepo(r)} 
+                                                        disabled={analyzing}
+                                                        style={{ marginLeft: 10, fontSize: "0.8em" }}
+                                                    >
+                                                        {analyzing ? "..." : "Select & Analyze"}
+                                                    </button>
                                                 </li>
                                             ))}
                                         </ul>
+                                    </div>
+                                )}
+
+                                {analyzing && <p>🔍 Analyzing repository structure...</p>}
+                                
+                                {selectedProject && (
+                                    <div style={{ marginTop: 20, padding: 12, border: "2px solid #4CAF50", borderRadius: 8 }}>
+                                        <h3 style={{ margin: "0 0 10px 0" }}>Project Ready 🚀</h3>
+                                        <div><b>Repo:</b> {selectedProject.repoFullName}</div>
+                                        <div><b>Branch:</b> {selectedProject.branch}</div>
+                                        <div><b>Detected Framework:</b> {selectedProject.framework}</div>
+                                        <div style={{ marginTop: 10, color: "#666" }}>
+                                            Next step: Generate Dockerfile & Deploy (Coming soon)
+                                        </div>
                                     </div>
                                 )}
                             </div>

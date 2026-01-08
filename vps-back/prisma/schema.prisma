@@ -35,7 +35,12 @@ model Project {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  name      String
+  name             String
+  repoFullName     String   // e.g. "facebook/react"
+  branch           String   @default("main")
+  framework        String?  // e.g. "react", "node", "python-flask"
+  deploymentStatus String   @default("IDLE") // IDLE, BUILDING, DEPLOYED, FAILED
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
