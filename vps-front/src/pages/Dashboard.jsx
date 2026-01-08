@@ -7,6 +7,23 @@ export default function Dashboard() {
     const nav = useNavigate();
     const [user, setUser] = useState(null);
     const [err, setErr] = useState("");
+    const [repos, setRepos] = useState(null);
+    const [loadingRepos, setLoadingRepos] = useState(false);
+    const [repoError, setRepoError] = useState("");
+
+    const fetchRepos = async () => {
+        setLoadingRepos(true);
+        setRepoError("");
+        try {
+            const token = getToken();
+            const data = await apiFetch("/api/github/repos", { token });
+            setRepos(data.repos);
+        } catch (e) {
+            setRepoError(e.message);
+        } finally {
+            setLoadingRepos(false);
+        }
+    };
 
     useEffect(() => {
         const token = getToken();
@@ -60,7 +77,29 @@ export default function Dashboard() {
                                 Connect GitHub
                             </button>
                         ) : (
-                            <p>GitHub connected ✅</p>
+                            <div>
+                                <p>GitHub connected ✅</p>
+                                <button onClick={fetchRepos} disabled={loadingRepos} style={{ marginTop: 8 }}>
+                                    {loadingRepos ? "Loading..." : "List GitHub Repositories"}
+                                </button>
+                                {repoError && <p style={{ color: "crimson" }}>{repoError}</p>}
+
+                                {repos && (
+                                    <div style={{ marginTop: 12 }}>
+                                        <h4>Repositories ({repos.length})</h4>
+                                        <ul style={{ maxHeight: 300, overflowY: "auto", paddingLeft: 20 }}>
+                                            {repos.map((r) => (
+                                                <li key={r.id}>
+                                                    <a href={r.html_url} target="_blank" rel="noreferrer">
+                                                        {r.full_name}
+                                                    </a>
+                                                    {r.private ? " 🔒" : ""}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
                         )}
 
                     </div>

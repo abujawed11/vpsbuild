@@ -72,4 +72,36 @@ router.get("/callback", async (req, res) => {
   res.redirect(`${frontend}/dashboard?connected=1`);
 });
 
+// 3) List user repos
+router.get("/repos", authRequired, async (req, res) => {
+  try {
+    const account = await prisma.githubAccount.findUnique({
+      where: { userId: req.user.id }
+    });
+
+    if (!account) {
+      return res.status(400).json({ error: "No GitHub account connected" });
+    }
+
+    // Fetch repos from GitHub (defaults to public + private if scope allows)
+    const { data } = await axios.get("https://api.github.com/user/repos?sort=updated&per_page=100", {
+      headers: { Authorization: `Bearer ${account.accessToken}` }
+    });
+
+    const repos = data.map((r) => ({
+      id: r.id,
+      name: r.name,
+      full_name: r.full_name,
+      private: r.private,
+      default_branch: r.default_branch,
+      html_url: r.html_url,
+    }));
+
+    res.json({ repos });
+  } catch (err) {
+    console.error("GitHub repos error:", err.message);
+    res.status(500).json({ error: "Failed to fetch repos from GitHub" });
+  }
+});
+
 module.exports = router;
