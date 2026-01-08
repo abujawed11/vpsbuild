@@ -33,9 +33,13 @@ async function cloneRepo(repoFullName, branch, token, targetDir) {
     const command = `git clone --depth 1 --branch ${branch} "${authUrl}" .`;
 
     console.log(`Cloning ${repoFullName} (branch: ${branch}) into ${targetDir}...`);
-    
-    // Execute command inside the target directory
-    await execAsync(command, { cwd: targetDir });
+
+    // Execute command inside the target directory with 60 second timeout
+    await execAsync(command, {
+      cwd: targetDir,
+      timeout: 60000, // 60 seconds
+      maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+    });
 
     console.log("Clone successful.");
     return true;

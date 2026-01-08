@@ -35,36 +35,40 @@ model Project {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // Basic Info
   name             String
   repoFullName     String   // e.g. "facebook/react"
-  branch           String   @default("main")
-  framework        String?  // e.g. "react", "node", "python-flask"
-  deploymentStatus String   @default("IDLE") // IDLE, BUILDING, DEPLOYED, FAILED
-  
+  productionBranch String   @default("main")
+
+  // Auto-detected Project Type (hidden from users)
+  projectType      ProjectType @default(MONOREPO)
+
   // Workspace info
   workspacePath    String?  // Absolute path on backend
-  frontendRoot     String?  // Relative path to workspace root
-  backendRoot      String?  // Relative path to workspace root
-  cloneStatus      String   @default("PENDING") // PENDING, CLONED, FAILED
+  cloneStatus      CloneStatus @default(PENDING)
 
-  // Analysis / Build Config
-  analysisStatus   String   @default("PENDING") // PENDING, ANALYZED, FAILED
-  runtime          String?  // node, python, static, docker
-  packageManager   String?  // npm, yarn, pnpm, pip
-  buildCommand     String?
-  startCommand     String?
-  outputDir        String?
-  port             Int?     @default(3000)
-  
-  // Docker Info
-  dockerfileGenerated Boolean @default(false)
-  
-  deployType              DeployType       @default(BACKEND)
-  dockerfileBackendContent String? // @db.Text is implied for String in Prisma unless specified length, but usually Text in Postgres
-  dockerfileFrontendContent String?
-  dockerfileBackendSource  DockerfileSource @default(GENERATED)
-  dockerfileFrontendSource DockerfileSource @default(GENERATED)
-  generatorVersion         String?
+  // Frontend Config (null if not applicable)
+  frontendRoot      String?
+  frontendFramework String?
+  frontendBuildCmd  String?
+  frontendOutputDir String?
+  frontendNodeVersion String? @default("18")
+
+  // Backend Config (null if not applicable)
+  backendRoot       String?
+  backendRuntime    String?  // node, python
+  backendStartCmd   String?
+  backendPort       Int?
+  backendPackageManager String?
+
+  // Deployment Settings
+  autoDeployEnabled Boolean @default(true)
+
+  // Relations
+  deployments      Deployment[]
+  branchConfigs    BranchConfig[]
+  envVariables     EnvVariable[]
+  domains          Domain[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -72,13 +76,110 @@ model Project {
   @@unique([userId, name])
 }
 
-enum DeployType {
-  BACKEND
-  FRONTEND
-  FULLSTACK
+enum ProjectType {
+  MONOREPO       // Has both frontend and backend
+  FRONTEND_ONLY  // Static site or SPA
+  BACKEND_ONLY   // API or server
 }
 
-enum DockerfileSource {
-  GENERATED
-  USER_EDITED
+enum CloneStatus {
+  PENDING
+  CLONING
+  CLONED
+  FAILED
+}
+
+model Deployment {
+  id         String @id @default(cuid())
+  projectId  String
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Git Info
+  commitHash    String
+  commitMessage String?
+  branch        String
+
+  // Status
+  status        DeploymentStatus @default(QUEUED)
+  url           String? // Assigned URL
+
+  // Build Info
+  buildStarted  DateTime?
+  buildFinished DateTime?
+  buildDuration Int? // seconds
+  buildLogs     String? @db.Text
+
+  // Deployment Info
+  deployedAt    DateTime?
+
+  // Errors
+  errorMessage  String? @db.Text
+
+  // Type
+  deploymentType DeploymentType @default(PREVIEW)
+
+  // Docker Info (generated internally)
+  dockerfileBackendContent  String? @db.Text
+  dockerfileFrontendContent String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum DeploymentStatus {
+  QUEUED
+  CLONING
+  ANALYZING
+  BUILDING
+  DEPLOYING
+  READY
+  ERROR
+  CANCELLED
+}
+
+enum DeploymentType {
+  PRODUCTION
+  PREVIEW
+}
+
+model BranchConfig {
+  id        String @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  branchName        String
+  autoDeployEnabled Boolean @default(false)
+  isProduction      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, branchName])
+}
+
+model EnvVariable {
+  id        String @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  key       String
+  value     String // TODO: Encrypt in production
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, key])
+}
+
+model Domain {
+  id        String @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  domain    String @unique
+  verified  Boolean @default(false)
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

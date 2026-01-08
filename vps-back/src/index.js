@@ -4,6 +4,7 @@ require("dotenv").config();
 const morgan = require("morgan");
 const githubRoutes = require("./routes/github");
 const projectsRoutes = require("./routes/projects");
+const projectsV2Routes = require("./routes/projects-v2");
 
 const authRoutes = require("./routes/auth");
 const meRoutes = require("./routes/me");
@@ -24,6 +25,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/me", meRoutes);
 app.use("/api/github", githubRoutes);
 app.use("/api/projects", projectsRoutes);
+app.use("/api/v2/projects", projectsV2Routes);
 
 const port = Number(process.env.PORT || 5000);
 app.listen(port, () => console.log(`API running on http://localhost:${port}`));
