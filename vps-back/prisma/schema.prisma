@@ -55,6 +55,9 @@ model Project {
   startCommand     String?
   outputDir        String?
   port             Int?     @default(3000)
+  
+  // Docker Info
+  dockerfileGenerated Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

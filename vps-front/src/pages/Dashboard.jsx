@@ -34,6 +34,10 @@ export default function Dashboard() {
     // New selection state for the explorer
     const [explorerSelection, setExplorerSelection] = useState(null);
 
+    // Docker Generation
+    const [generatingDocker, setGeneratingDocker] = useState(false);
+    const [dockerfileContent, setDockerfileContent] = useState("");
+
     const fetchRepos = async () => {
         setLoadingRepos(true);
         setRepoError("");
@@ -169,6 +173,25 @@ export default function Dashboard() {
             alert("Failed to analyze repo: " + e.message);
         } finally {
             setAnalyzing(false);
+        }
+    };
+
+    const generateDockerfile = async () => {
+        setGeneratingDocker(true);
+        try {
+            const token = getToken();
+            const res = await apiFetch("/api/projects/dockerfile", {
+                method: "POST",
+                token,
+                body: { projectId: selectedProject.id }
+            });
+            setDockerfileContent(res.content);
+            // Refresh project to get flag update
+            setSelectedProject(prev => ({ ...prev, dockerfileGenerated: true }));
+        } catch (e) {
+            alert("Failed to generate Dockerfile: " + e.message);
+        } finally {
+            setGeneratingDocker(false);
         }
     };
 
@@ -401,8 +424,34 @@ export default function Dashboard() {
                                                             <div style={{ gridColumn: "1 / -1" }}><b>Start Cmd:</b> {selectedProject.startCommand || "(none)"}</div>
                                                         </div>
                                                         <div style={{ marginTop: 12, color: "#666" }}>
-                                                            Next step: Generate Dockerfile & Deploy (Coming soon)
+                                                            Next step: Generate Dockerfile
                                                         </div>
+
+                                                        {!selectedProject.dockerfileGenerated ? (
+                                                            <button 
+                                                                onClick={generateDockerfile} 
+                                                                disabled={generatingDocker}
+                                                                style={{ marginTop: 12, background: "#009688", color: "white" }}
+                                                            >
+                                                                {generatingDocker ? "Generating..." : "Generate Dockerfile"}
+                                                            </button>
+                                                        ) : (
+                                                            <div style={{ marginTop: 12 }}>
+                                                                <div style={{ color: "green", fontWeight: "bold", marginBottom: 8 }}>Dockerfile Ready ✅</div>
+                                                                
+                                                                {dockerfileContent ? (
+                                                                    <div style={{ background: "#222", color: "#e0e0e0", padding: 10, borderRadius: 4, fontSize: "0.8em", overflowX: "auto" }}>
+                                                                        <pre style={{ margin: 0 }}>{dockerfileContent}</pre>
+                                                                    </div>
+                                                                ) : (
+                                                                    <button onClick={() => alert("Preview not loaded. (Implement fetch if needed)")} style={{ fontSize: "0.8em" }}>View Dockerfile</button>
+                                                                )}
+
+                                                                <div style={{ marginTop: 12, color: "#666" }}>
+                                                                    Ready for Deployment 🚀
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
 

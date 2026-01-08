@@ -7,8 +7,44 @@ const { detectFramework } = require("../lib/detector");
 const { cloneRepo } = require("../lib/git");
 const { analyzeWorkspace } = require("../lib/analyzer");
 const { getDirectoryChildren } = require("../lib/file-utils");
+const { createDockerfile } = require("../lib/docker-generator");
 
 const router = express.Router();
+
+// POST /api/projects/dockerfile
+router.post("/dockerfile", authRequired, async (req, res) => {
+    const { projectId } = req.body;
+    if (!projectId) return res.status(400).json({ error: "Missing projectId" });
+
+    try {
+        const project = await prisma.project.findUnique({ where: { id: projectId } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        // Determine target directory
+        let relPath = "";
+        if (project.backendRoot) relPath = project.backendRoot;
+        else if (project.frontendRoot) relPath = project.frontendRoot;
+        
+        const targetDir = path.join(project.workspacePath, relPath);
+
+        // Generate
+        const content = await createDockerfile(project, targetDir);
+
+        // Update DB
+        await prisma.project.update({
+            where: { id: projectId },
+            data: { dockerfileGenerated: true }
+        });
+
+        res.json({ success: true, content });
+
+    } catch (err) {
+        console.error("Dockerfile generation error:", err.message);
+        res.status(500).json({ error: "Failed to generate Dockerfile" });
+    }
+});
 
 // GET /api/projects/:id/tree
 // Query: ?path=src/components (optional)
