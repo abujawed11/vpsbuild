@@ -36,7 +36,9 @@ export default function Dashboard() {
 
     // Docker Generation
     const [generatingDocker, setGeneratingDocker] = useState(false);
-    const [dockerfileContent, setDockerfileContent] = useState("");
+    const [deployType, setDeployTypeState] = useState("BACKEND");
+    const [backendContent, setBackendContent] = useState("");
+    const [frontendContent, setFrontendContent] = useState("");
 
     const fetchRepos = async () => {
         setLoadingRepos(true);
@@ -176,16 +178,33 @@ export default function Dashboard() {
         }
     };
 
+    const changeDeployType = async (type) => {
+        if (!selectedProject) return;
+        try {
+            const token = getToken();
+            await apiFetch(`/api/projects/${selectedProject.id}/deploy-type`, {
+                method: "POST",
+                token,
+                body: { deployType: type }
+            });
+            setDeployTypeState(type);
+            // Reset generated content if switching types? Maybe not, keep them if cached.
+        } catch (e) {
+            alert("Failed to set deploy type: " + e.message);
+        }
+    };
+
     const generateDockerfile = async () => {
         setGeneratingDocker(true);
         try {
             const token = getToken();
-            const res = await apiFetch("/api/projects/dockerfile", {
+            const res = await apiFetch(`/api/projects/${selectedProject.id}/generate-dockerfiles`, {
                 method: "POST",
-                token,
-                body: { projectId: selectedProject.id }
+                token
             });
-            setDockerfileContent(res.content);
+            setBackendContent(res.backendContent);
+            setFrontendContent(res.frontendContent);
+            
             // Refresh project to get flag update
             setSelectedProject(prev => ({ ...prev, dockerfileGenerated: true }));
         } catch (e) {
@@ -194,6 +213,21 @@ export default function Dashboard() {
             setGeneratingDocker(false);
         }
     };
+    
+    // Sync state when project loads
+    useEffect(() => {
+        if (selectedProject) {
+            // Fetch detailed deploy config
+            const token = getToken();
+            apiFetch(`/api/projects/${selectedProject.id}/deploy-config`, { token })
+                .then(res => {
+                    setDeployTypeState(res.deployType);
+                    setBackendContent(res.dockerfileBackendContent);
+                    setFrontendContent(res.dockerfileFrontendContent);
+                })
+                .catch(console.error);
+        }
+    }, [selectedProject]);
 
     useEffect(() => {
         const token = getToken();
@@ -424,28 +458,58 @@ export default function Dashboard() {
                                                             <div style={{ gridColumn: "1 / -1" }}><b>Start Cmd:</b> {selectedProject.startCommand || "(none)"}</div>
                                                         </div>
                                                         <div style={{ marginTop: 12, color: "#666" }}>
-                                                            Next step: Generate Dockerfile
+                                                            Next step: Configure & Generate Dockerfile
+                                                        </div>
+
+                                                        {/* Deploy Type Selector */}
+                                                        <div style={{ marginTop: 16, marginBottom: 16 }}>
+                                                            <label style={{ marginRight: 10, fontWeight: "bold" }}>Deploy Type:</label>
+                                                            <select 
+                                                                value={deployType} 
+                                                                onChange={(e) => changeDeployType(e.target.value)}
+                                                                style={{ padding: 4 }}
+                                                            >
+                                                                <option value="BACKEND">Backend Only (Node/Python)</option>
+                                                                <option value="FRONTEND">Frontend Only (Static/SPA)</option>
+                                                                <option value="FULLSTACK">Fullstack (Repo has both)</option>
+                                                            </select>
                                                         </div>
 
                                                         {!selectedProject.dockerfileGenerated ? (
                                                             <button 
                                                                 onClick={generateDockerfile} 
                                                                 disabled={generatingDocker}
-                                                                style={{ marginTop: 12, background: "#009688", color: "white" }}
+                                                                style={{ marginTop: 6, background: "#009688", color: "white" }}
                                                             >
-                                                                {generatingDocker ? "Generating..." : "Generate Dockerfile"}
+                                                                {generatingDocker ? "Generating..." : "Generate Dockerfile(s)"}
                                                             </button>
                                                         ) : (
                                                             <div style={{ marginTop: 12 }}>
                                                                 <div style={{ color: "green", fontWeight: "bold", marginBottom: 8 }}>Dockerfile Ready ✅</div>
                                                                 
-                                                                {dockerfileContent ? (
-                                                                    <div style={{ background: "#222", color: "#e0e0e0", padding: 10, borderRadius: 4, fontSize: "0.8em", overflowX: "auto" }}>
-                                                                        <pre style={{ margin: 0 }}>{dockerfileContent}</pre>
+                                                                {/* Backend Dockerfile View */}
+                                                                {(deployType === "BACKEND" || deployType === "FULLSTACK") && backendContent && (
+                                                                    <div style={{ marginBottom: 12 }}>
+                                                                        <div style={{ fontSize: "0.8em", fontWeight: "bold", marginBottom: 4 }}>Backend Dockerfile</div>
+                                                                        <div style={{ background: "#222", color: "#e0e0e0", padding: 10, borderRadius: 4, fontSize: "0.8em", overflowX: "auto" }}>
+                                                                            <pre style={{ margin: 0 }}>{backendContent}</pre>
+                                                                        </div>
                                                                     </div>
-                                                                ) : (
-                                                                    <button onClick={() => alert("Preview not loaded. (Implement fetch if needed)")} style={{ fontSize: "0.8em" }}>View Dockerfile</button>
                                                                 )}
+
+                                                                {/* Frontend Dockerfile View */}
+                                                                {(deployType === "FRONTEND" || deployType === "FULLSTACK") && frontendContent && (
+                                                                    <div style={{ marginBottom: 12 }}>
+                                                                        <div style={{ fontSize: "0.8em", fontWeight: "bold", marginBottom: 4 }}>Frontend Dockerfile</div>
+                                                                        <div style={{ background: "#222", color: "#e0e0e0", padding: 10, borderRadius: 4, fontSize: "0.8em", overflowX: "auto" }}>
+                                                                            <pre style={{ margin: 0 }}>{frontendContent}</pre>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                
+                                                                <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+                                                                    <button onClick={generateDockerfile} style={{ fontSize: "0.8em" }}>Regenerate</button>
+                                                                </div>
 
                                                                 <div style={{ marginTop: 12, color: "#666" }}>
                                                                     Ready for Deployment 🚀

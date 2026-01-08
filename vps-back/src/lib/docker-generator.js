@@ -1,27 +1,20 @@
 const fs = require("fs");
 const path = require("path");
 
-function generateNodeDockerfile(config) {
-  const { packageManager, port, startCommand } = config;
+function generateNodeBackendDockerfile(config) {
+  const { packageManager = "npm", port = 3000, startCommand = "npm start" } = config;
 
-  let installCmd = "npm ci --only=production";
+  let installCmd = "npm ci --omit=dev"; // default for npm
   let copyFiles = "COPY package*.json ./";
-  
+
   if (packageManager === "yarn") {
     installCmd = "yarn install --production --frozen-lockfile";
     copyFiles = "COPY package.json yarn.lock ./";
   } else if (packageManager === "pnpm") {
     installCmd = "npm install -g pnpm && pnpm install --prod --frozen-lockfile";
     copyFiles = "COPY package.json pnpm-lock.yaml ./";
-  } else {
-    // Fallback for npm if no lockfile might mean just install
-    installCmd = "npm install --production"; 
   }
 
-  // Split start command for CMD array format to handle signals better?
-  // For now string format is fine: CMD npm start
-  // Actually, exec form ["npm", "start"] is better but string is safer for complex commands.
-  
   return `FROM node:18-alpine
 
 WORKDIR /app
@@ -34,19 +27,19 @@ RUN ${installCmd}
 COPY . .
 
 # Environment
-ENV PORT=${port}
 ENV NODE_ENV=production
+ENV PORT=${port}
 
 EXPOSE ${port}
 
 # Start
-CMD ${startCommand}
+CMD ["sh", "-c", "${startCommand}"]
 `;
 }
 
-function generatePythonDockerfile(config) {
-  const { port, startCommand } = config;
-  
+function generatePythonBackendDockerfile(config) {
+  const { port = 5000, startCommand = "python app.py" } = config;
+
   return `FROM python:3.9-slim
 
 WORKDIR /app
@@ -64,29 +57,59 @@ ENV PORT=${port}
 EXPOSE ${port}
 
 # Start
-CMD ${startCommand}
+CMD ["sh", "-c", "${startCommand}"]
 `;
 }
 
-function generateStaticDockerfile(config) {
-  return `FROM nginx:alpine
-COPY . /usr/share/nginx/html
+function generateFrontendDockerfile(config) {
+  const { packageManager = "npm", outputDir = "dist", buildCommand } = config;
+
+  let installCmd = "npm ci";
+  let copyFiles = "COPY package*.json ./";
+  let finalBuildCmd = buildCommand;
+
+  if (packageManager === "yarn") {
+    installCmd = "yarn install --frozen-lockfile";
+    copyFiles = "COPY package.json yarn.lock ./";
+    // Adapt build command if it uses npm
+    if (!finalBuildCmd || finalBuildCmd.startsWith("npm")) {
+      finalBuildCmd = "yarn build";
+    }
+  } else if (packageManager === "pnpm") {
+    installCmd = "npm install -g pnpm && pnpm install --frozen-lockfile";
+    copyFiles = "COPY package.json pnpm-lock.yaml ./";
+    // Adapt build command if it uses npm
+    if (!finalBuildCmd || finalBuildCmd.startsWith("npm")) {
+      finalBuildCmd = "pnpm build";
+    }
+  } else {
+    // Default npm
+    if (!finalBuildCmd) {
+      finalBuildCmd = "npm run build";
+    }
+  }
+
+  return `# Stage 1: Build
+FROM node:18-alpine as builder
+WORKDIR /app
+
+${copyFiles}
+RUN ${installCmd}
+
+COPY . .
+RUN ${finalBuildCmd}
+
+# Stage 2: Serve
+FROM nginx:alpine
+COPY --from=builder /app/${outputDir} /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 `;
 }
 
-async function createDockerfile(project, targetDir) {
-  let content = "";
-
-  if (project.runtime === "node") {
-    content = generateNodeDockerfile(project);
-  } else if (project.runtime === "python") {
-    content = generatePythonDockerfile(project);
-  } else if (project.runtime === "static") {
-    content = generateStaticDockerfile(project);
-  } else {
-    throw new Error(`Unsupported runtime: ${project.runtime}`);
+async function writeDockerfile(content, targetDir) {
+  if (!fs.existsSync(targetDir)) {
+      throw new Error(`Target directory does not exist: ${targetDir}`);
   }
 
   const dockerfilePath = path.join(targetDir, "Dockerfile");
@@ -99,8 +122,11 @@ async function createDockerfile(project, targetDir) {
     const ignoreContent = "node_modules\n.git\n.env\ndist\nbuild\ncoverage\n";
     await fs.promises.writeFile(dockerIgnorePath, ignoreContent);
   }
-
-  return content;
 }
 
-module.exports = { createDockerfile };
+module.exports = { 
+    generateNodeBackendDockerfile, 
+    generatePythonBackendDockerfile, 
+    generateFrontendDockerfile,
+    writeDockerfile 
+};

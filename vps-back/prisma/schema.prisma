@@ -58,9 +58,27 @@ model Project {
   
   // Docker Info
   dockerfileGenerated Boolean @default(false)
+  
+  deployType              DeployType       @default(BACKEND)
+  dockerfileBackendContent String? // @db.Text is implied for String in Prisma unless specified length, but usually Text in Postgres
+  dockerfileFrontendContent String?
+  dockerfileBackendSource  DockerfileSource @default(GENERATED)
+  dockerfileFrontendSource DockerfileSource @default(GENERATED)
+  generatorVersion         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([userId, name])
+}
+
+enum DeployType {
+  BACKEND
+  FRONTEND
+  FULLSTACK
+}
+
+enum DockerfileSource {
+  GENERATED
+  USER_EDITED
 }

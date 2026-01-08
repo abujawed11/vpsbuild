@@ -7,42 +7,152 @@ const { detectFramework } = require("../lib/detector");
 const { cloneRepo } = require("../lib/git");
 const { analyzeWorkspace } = require("../lib/analyzer");
 const { getDirectoryChildren } = require("../lib/file-utils");
-const { createDockerfile } = require("../lib/docker-generator");
+const { 
+    generateNodeBackendDockerfile, 
+    generatePythonBackendDockerfile, 
+    generateFrontendDockerfile, 
+    writeDockerfile 
+} = require("../lib/docker-generator");
 
 const router = express.Router();
 
-// POST /api/projects/dockerfile
-router.post("/dockerfile", authRequired, async (req, res) => {
-    const { projectId } = req.body;
-    if (!projectId) return res.status(400).json({ error: "Missing projectId" });
+// GET /api/projects/:id/deploy-config
+router.get("/:id/deploy-config", authRequired, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const project = await prisma.project.findUnique({ where: { id } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+        res.json({
+            deployType: project.deployType,
+            backendRoot: project.backendRoot,
+            frontendRoot: project.frontendRoot,
+            dockerfileBackendContent: project.dockerfileBackendContent,
+            dockerfileFrontendContent: project.dockerfileFrontendContent,
+            dockerfileGenerated: project.dockerfileGenerated
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to get config" });
+    }
+});
+
+// POST /api/projects/:id/deploy-type
+router.post("/:id/deploy-type", authRequired, async (req, res) => {
+    const { id } = req.params;
+    const { deployType } = req.body; // BACKEND, FRONTEND, FULLSTACK
+
+    if (!["BACKEND", "FRONTEND", "FULLSTACK"].includes(deployType)) {
+        return res.status(400).json({ error: "Invalid deployType" });
+    }
 
     try {
-        const project = await prisma.project.findUnique({ where: { id: projectId } });
+        const project = await prisma.project.findUnique({ where: { id } });
         if (!project || project.userId !== req.user.id) {
             return res.status(404).json({ error: "Project not found" });
         }
 
-        // Determine target directory
-        let relPath = "";
-        if (project.backendRoot) relPath = project.backendRoot;
-        else if (project.frontendRoot) relPath = project.frontendRoot;
-        
-        const targetDir = path.join(project.workspacePath, relPath);
+        await prisma.project.update({
+            where: { id },
+            data: { deployType }
+        });
 
-        // Generate
-        const content = await createDockerfile(project, targetDir);
+        res.json({ success: true, deployType });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to set deploy type" });
+    }
+});
+
+// POST /api/projects/:id/generate-dockerfiles
+router.post("/:id/generate-dockerfiles", authRequired, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const project = await prisma.project.findUnique({ where: { id } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        const workspacePath = project.workspacePath;
+        if (!workspacePath) return res.status(400).json({ error: "Workspace not ready" });
+
+        // Validate FULLSTACK configuration before generation
+        if (project.deployType === "FULLSTACK") {
+            // Both roots must be explicitly set for fullstack
+            if (project.backendRoot === null || project.frontendRoot === null) {
+                return res.status(400).json({
+                    error: "FULLSTACK deployment requires both frontend and backend folders to be configured. Please click 'Configure folders' to set them."
+                });
+            }
+            // Ensure they're not in the same directory (would overwrite Dockerfiles)
+            if (project.backendRoot === project.frontendRoot) {
+                return res.status(400).json({
+                    error: "Backend and frontend must be in different directories for FULLSTACK deployment."
+                });
+            }
+        }
+
+        let backendContent = null;
+        let frontendContent = null;
+
+        // Helper to get config
+        const getConfig = async (rootRel) => {
+            return await analyzeWorkspace(workspacePath, rootRel || "");
+        };
+
+        // Generate Backend
+        if (project.deployType === "BACKEND" || project.deployType === "FULLSTACK") {
+            let root = project.backendRoot;
+            // Default to root directory if not set (for BACKEND-only deploys)
+            if (root === null) root = "";
+
+            const config = await getConfig(root);
+
+            // Generate appropriate Dockerfile based on runtime
+            if (config.runtime === "node") {
+                backendContent = generateNodeBackendDockerfile(config);
+            } else if (config.runtime === "python") {
+                backendContent = generatePythonBackendDockerfile(config);
+            } else {
+                throw new Error(`Unsupported backend runtime: ${config.runtime}. Expected 'node' or 'python'.`);
+            }
+
+            // Write file
+            const targetDir = path.join(workspacePath, root);
+            await writeDockerfile(backendContent, targetDir);
+        }
+
+        // Generate Frontend
+        if (project.deployType === "FRONTEND" || project.deployType === "FULLSTACK") {
+            let root = project.frontendRoot;
+            // Default to root directory if not set (for FRONTEND-only deploys)
+            if (root === null) root = "";
+
+            const config = await getConfig(root);
+            frontendContent = generateFrontendDockerfile(config);
+
+            // Write file
+            const targetDir = path.join(workspacePath, root);
+            await writeDockerfile(frontendContent, targetDir);
+        }
 
         // Update DB
         await prisma.project.update({
-            where: { id: projectId },
-            data: { dockerfileGenerated: true }
+            where: { id },
+            data: {
+                dockerfileGenerated: true,
+                dockerfileBackendContent: backendContent,
+                dockerfileFrontendContent: frontendContent,
+                dockerfileBackendSource: "GENERATED",
+                dockerfileFrontendSource: "GENERATED"
+            }
         });
 
-        res.json({ success: true, content });
+        res.json({ success: true, backendContent, frontendContent });
 
     } catch (err) {
         console.error("Dockerfile generation error:", err.message);
-        res.status(500).json({ error: "Failed to generate Dockerfile" });
+        res.status(500).json({ error: "Failed to generate Dockerfiles" });
     }
 });
 

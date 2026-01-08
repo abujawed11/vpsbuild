@@ -29,22 +29,33 @@ async function analyzeWorkspace(basePath, relativePath = "") {
     else if (hasFile("pnpm-lock.yaml")) config.packageManager = "pnpm";
     else config.packageManager = "npm";
 
+    // Helper to get command with correct package manager
+    const getCmd = (script) => {
+      if (config.packageManager === "yarn") {
+        return `yarn ${script}`;
+      } else if (config.packageManager === "pnpm") {
+        return `pnpm ${script}`;
+      } else {
+        return `npm run ${script}`;
+      }
+    };
+
     // Framework Detection & Defaults
     if (deps["next"]) {
       config.framework = "nextjs";
-      config.buildCommand = "npm run build"; // Adapter will handle runner
-      config.startCommand = "npm start";
+      config.buildCommand = getCmd("build");
+      config.startCommand = getCmd("start");
       config.outputDir = ".next";
       config.port = 3000;
     } else if (deps["vite"]) {
       config.framework = "react-vite"; // or vue-vite
-      config.buildCommand = "npm run build";
-      config.startCommand = "npm run preview"; // or serve dist
+      config.buildCommand = getCmd("build");
+      config.startCommand = getCmd("preview"); // or serve dist
       config.outputDir = "dist";
       config.port = 4173; // Vite preview default
     } else if (deps["react-scripts"]) {
       config.framework = "create-react-app";
-      config.buildCommand = "npm run build";
+      config.buildCommand = getCmd("build");
       config.startCommand = "npx serve -s build";
       config.outputDir = "build";
       config.port = 3000;
@@ -59,12 +70,12 @@ async function analyzeWorkspace(basePath, relativePath = "") {
     // Override if scripts exist
     if (scripts.build) {
         // preserve detected build command if it matches script name, or use generic
-        if (!config.buildCommand) config.buildCommand = `${config.packageManager} run build`;
+        if (!config.buildCommand) config.buildCommand = getCmd("build");
     }
-    
+
     // Fallback start command
     if (!config.startCommand) {
-        if (scripts.start) config.startCommand = `${config.packageManager} run start`;
+        if (scripts.start) config.startCommand = getCmd("start");
         else if (hasFile("index.js")) config.startCommand = "node index.js";
         else if (hasFile("server.js")) config.startCommand = "node server.js";
         else if (hasFile("app.js")) config.startCommand = "node app.js";
