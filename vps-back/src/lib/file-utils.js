@@ -14,61 +14,61 @@ const SIGNAL_FILES = [
   "Dockerfile", "docker-compose.yml"
 ];
 
-async function getDirectoryTree(dirPath, rootPath, depth = 3) {
-  if (depth < 0) return [];
+async function getDirectoryChildren(workspacePath, relativePath = "") {
+  // Security check: ensure relativePath doesn't try to go up
+  const safeRelative = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+  const fullPath = path.join(workspacePath, safeRelative);
+
+  if (!fullPath.startsWith(workspacePath)) {
+      throw new Error("Invalid path");
+  }
 
   try {
-    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-    
-    const tree = [];
-    
-    for (const entry of entries) {
-      if (entry.isDirectory() && !IGNORED_DIRS.has(entry.name)) {
-        const fullPath = path.join(dirPath, entry.name);
-        const relPath = path.relative(rootPath, fullPath).replace(/\\/g, "/");
-        
-        // Let's just scan the direct children for signals
-        const subEntries = await fs.promises.readdir(fullPath).catch(() => []);
-        const folderSignals = subEntries.filter(f => SIGNAL_FILES.includes(f));
-        
-        const node = {
-          name: entry.name,
-          path: relPath,
-          type: "folder",
-          signals: folderSignals,
-          children: depth > 0 ? await getDirectoryTree(fullPath, rootPath, depth - 1) : []
-        };
-        tree.push(node);
-      }
-    }
-    
-    return tree;
+      const entries = await fs.promises.readdir(fullPath, { withFileTypes: true });
+      const children = [];
 
+      for (const entry of entries) {
+          if (IGNORED_DIRS.has(entry.name)) continue;
+
+          // We only care about folders for this picker? 
+          // Request said "File Explorer" feel but we are picking *folders*.
+          // Displaying files might be nice for context (e.g. package.json), but let's stick to folders + signals for now to keep it clean, 
+          // OR include files but disable selection. 
+          // The previous implementation showed signals. Let's stick to folders but check for signals.
+          
+          if (entry.isDirectory()) {
+              const childRelPath = path.join(safeRelative, entry.name).replace(/\\/g, "/");
+              
+              // Check for signals in this folder (shallow scan of its children)
+              const subPath = path.join(fullPath, entry.name);
+              const subEntries = await fs.promises.readdir(subPath).catch(() => []);
+              const folderSignals = subEntries.filter(f => SIGNAL_FILES.includes(f));
+              
+              // Check if it has subfolders (to show expand arrow)
+              // This is an extra read, but improved UX.
+              const hasSubfolders = subEntries.some(sub => {
+                  try {
+                      // We need to know if it is a directory. readdir returns names only unless withFileTypes is true, 
+                      // but subEntries above is just names? No, I need withFileTypes for checking children type.
+                      // Let's optimize: just mark it as folder. UI will verify on expand.
+                      return false; // We won't check deep to avoid perf hit.
+                  } catch { return false; }
+              });
+
+              children.push({
+                  name: entry.name,
+                  path: childRelPath,
+                  type: "folder",
+                  signals: folderSignals,
+                  hasChildren: true // Assume true for folders to show arrow, update later if empty?
+              });
+          }
+      }
+      return children;
   } catch (err) {
-    console.error(`Failed to scan ${dirPath}:`, err.message);
-    return [];
+      console.error(`Failed to scan ${fullPath}:`, err.message);
+      return [];
   }
 }
 
-/**
- * Scans the root workspace directory and returns a flat list of potential "root" candidates 
- * (folders containing package.json, requirements.txt, etc.)
- * AND the full directory tree for browsing.
- */
-async function scanWorkspaceForRoots(workspacePath) {
-    // 1. Get root signals
-    const rootEntries = await fs.promises.readdir(workspacePath).catch(() => []);
-    const rootSignals = rootEntries.filter(f => SIGNAL_FILES.includes(f));
-    
-    const rootNode = {
-        name: "(root)",
-        path: ".",
-        type: "folder",
-        signals: rootSignals,
-        children: await getDirectoryTree(workspacePath, workspacePath, 4)
-    };
-
-    return rootNode;
-}
-
-module.exports = { scanWorkspaceForRoots };
+module.exports = { getDirectoryChildren };

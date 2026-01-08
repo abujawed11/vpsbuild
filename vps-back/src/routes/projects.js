@@ -6,13 +6,16 @@ const path = require("path");
 const { detectFramework } = require("../lib/detector");
 const { cloneRepo } = require("../lib/git");
 const { analyzeWorkspace } = require("../lib/analyzer");
-const { scanWorkspaceForRoots } = require("../lib/file-utils");
+const { getDirectoryChildren } = require("../lib/file-utils");
 
 const router = express.Router();
 
 // GET /api/projects/:id/tree
+// Query: ?path=src/components (optional)
 router.get("/:id/tree", authRequired, async (req, res) => {
     const { id } = req.params;
+    const { path: relPath } = req.query;
+
     try {
         const project = await prisma.project.findUnique({ where: { id } });
         if (!project || project.userId !== req.user.id) {
@@ -22,8 +25,63 @@ router.get("/:id/tree", authRequired, async (req, res) => {
             return res.status(400).json({ error: "Workspace not ready" });
         }
 
-        const tree = await scanWorkspaceForRoots(project.workspacePath);
-        res.json({ tree });
+        if (relPath) {
+            // Lazy load specific folder
+            const children = await getDirectoryChildren(project.workspacePath, relPath);
+            res.json({ children });
+        } else {
+            // Initial load: root signals + root children
+            // We can reuse getDirectoryChildren for the children list
+            const children = await getDirectoryChildren(project.workspacePath, "");
+            
+            // We need to manually construct the root node to hold signals for the root itself
+            const fs = require("fs");
+            const path = require("path");
+            // Re-importing fs/path here is ugly but effective for this quick snippet without modifying imports globally
+            // Actually they are already available in file-utils scope but we are in routes.
+            // Let's rely on file-utils logic or just move this logic to file-utils.
+            // Since I removed scanWorkspaceForRoots logic from file-utils partially, let's fix this.
+            
+            // I'll call getDirectoryChildren("") which returns children of root.
+            // But I also need root's signals.
+            // I'll add a helper in file-utils for "getRootInfo" or just do it here.
+            // I'll do it here for now using `scanWorkspaceForRoots` if I hadn't deleted it? 
+            // I deleted `scanWorkspaceForRoots` implementation but kept the export? 
+            // No, I overwrote it.
+            // Let's just use getDirectoryChildren("") and fetch root signals manually.
+            
+            // Re-read root dir for signals
+            // (Simulated logic since I can't import fs easily if not at top)
+            // Actually I should have kept scanWorkspaceForRoots.
+            // I will return a "root" object.
+            
+             // We need `fs` to read root signals. 
+             // Let's assume the frontend asks for `path=.` or empty and we handle the "root node" construction on frontend?
+             // Or we return a `tree` object wrapping the root.
+             
+             // Let's return the children list and let frontend handle the root node visualization?
+             // But we need root signals.
+             
+             // I'll do:
+             const rootChildren = await getDirectoryChildren(project.workspacePath, "");
+             // Root signals - quick hack:
+             // I don't have access to fs easily here without require.
+             // I will use `require("fs")`
+             const rootFiles = await require("fs").promises.readdir(project.workspacePath).catch(() => []);
+             const SIGNAL_FILES = ["package.json", "vite.config.js", "next.config.js", "requirements.txt", "Pipfile", "index.html", "manage.py"]; 
+             const rootSignals = rootFiles.filter(f => SIGNAL_FILES.some(s => f.includes(s))); // Simple check
+
+             const tree = {
+                 name: "(Project Root)",
+                 path: ".",
+                 type: "folder",
+                 signals: rootSignals,
+                 children: rootChildren,
+                 expanded: true // Root is expanded by default
+             };
+             
+             res.json({ tree });
+        }
     } catch (err) {
         console.error("Tree scan error:", err.message);
         res.status(500).json({ error: "Failed to scan workspace" });

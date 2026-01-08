@@ -30,6 +30,9 @@ export default function Dashboard() {
     const [selectedFrontend, setSelectedFrontend] = useState("");
     const [selectedBackend, setSelectedBackend] = useState("");
     const [savingRoots, setSavingRoots] = useState(false);
+    
+    // New selection state for the explorer
+    const [explorerSelection, setExplorerSelection] = useState(null);
 
     const fetchRepos = async () => {
         setLoadingRepos(true);
@@ -83,6 +86,7 @@ export default function Dashboard() {
 
     const openFolderPicker = () => {
         setShowFolderPicker(true);
+        setExplorerSelection(null);
         fetchTree();
     };
 
@@ -221,14 +225,33 @@ export default function Dashboard() {
                             </div>
                         </div>
 
-                        <div style={{ border: "1px solid #ddd", padding: 10, borderRadius: 4, maxHeight: 300, overflowY: "auto" }}>
+                        {/* Actions for Selected Folder */}
+                        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+                            <button 
+                                disabled={!explorerSelection}
+                                onClick={() => setSelectedFrontend(explorerSelection)}
+                                style={{ flex: 1, padding: "8px", cursor: explorerSelection ? "pointer" : "not-allowed" }}
+                            >
+                                Set "{explorerSelection === "." ? "Root" : explorerSelection || "Selection"}" as Frontend
+                            </button>
+                            <button 
+                                disabled={!explorerSelection}
+                                onClick={() => setSelectedBackend(explorerSelection)}
+                                style={{ flex: 1, padding: "8px", cursor: explorerSelection ? "pointer" : "not-allowed" }}
+                            >
+                                Set "{explorerSelection === "." ? "Root" : explorerSelection || "Selection"}" as Backend
+                            </button>
+                        </div>
+
+                        <div style={{ border: "1px solid #ddd", padding: 10, borderRadius: 4, maxHeight: 300, overflowY: "auto", background: "white" }}>
                             {loadingTree ? (
                                 <p>Loading folders...</p>
                             ) : folderTree ? (
-                                <FolderTree 
-                                    node={folderTree} 
-                                    onSelectFrontend={setSelectedFrontend} 
-                                    onSelectBackend={setSelectedBackend} 
+                                <FileExplorer 
+                                    projectId={selectedProject.id}
+                                    rootNode={folderTree} // This is just the initial root node
+                                    selectedPath={explorerSelection}
+                                    onSelect={setExplorerSelection}
                                 />
                             ) : (
                                 <p>No files found.</p>
@@ -418,40 +441,112 @@ export default function Dashboard() {
     );
 }
 
-function FolderTree({ node, onSelectFrontend, onSelectBackend }) {
-    if (!node) return null;
+function FileExplorer({ projectId, rootNode, selectedPath, onSelect }) {
+    // Map of path -> boolean
+    const [expanded, setExpanded] = useState({ ".": true }); 
+    // Map of path -> array of children
+    const [childrenMap, setChildrenMap] = useState({ ".": rootNode.children });
+    const [loadingMap, setLoadingMap] = useState({});
 
-    const isRoot = node.path === ".";
-    
-    return (
-        <div style={{ marginLeft: isRoot ? 0 : 20 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                <span style={{ fontWeight: isRoot ? "bold" : "normal" }}>
-                    {isRoot ? "📂 Project Root" : `📁 ${node.name}`}
-                </span>
-                {/* Signals */}
-                {node.signals && node.signals.length > 0 && (
-                    <span style={{ fontSize: "0.7em", background: "#e0e0e0", padding: "2px 6px", borderRadius: 4 }}>
-                        {node.signals.join(", ")}
+    const toggleExpand = async (node) => {
+        const path = node.path;
+        const isExpanded = !!expanded[path];
+        
+        if (isExpanded) {
+            setExpanded(prev => ({ ...prev, [path]: false }));
+            return;
+        }
+
+        // Expand
+        setExpanded(prev => ({ ...prev, [path]: true }));
+
+        // Check if we need to load children
+        if (!childrenMap[path] && node.hasChildren) {
+            setLoadingMap(prev => ({ ...prev, [path]: true }));
+            try {
+                const token = getToken();
+                // Fetch children
+                const res = await apiFetch(`/api/projects/${projectId}/tree?path=${encodeURIComponent(path)}`, { token });
+                setChildrenMap(prev => ({ ...prev, [path]: res.children }));
+            } catch (e) {
+                console.error("Failed to load children", e);
+            } finally {
+                setLoadingMap(prev => ({ ...prev, [path]: false }));
+            }
+        }
+    };
+
+    // Recursive render helper
+    const renderNode = (node, depth = 0) => {
+        const isExpanded = expanded[node.path];
+        const children = childrenMap[node.path] || [];
+        const isLoading = loadingMap[node.path];
+        const isSelected = selectedPath === node.path;
+
+        return (
+            <div key={node.path}>
+                <div 
+                    onClick={() => onSelect(node.path)}
+                    style={{ 
+                        display: "flex", 
+                        alignItems: "center", 
+                        padding: "4px 8px", 
+                        paddingLeft: depth * 20 + 8,
+                        cursor: "pointer",
+                        background: isSelected ? "#e3f2fd" : "transparent",
+                        borderLeft: isSelected ? "3px solid #2196F3" : "3px solid transparent",
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isSelected ? "#e3f2fd" : "#f5f5f5"}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isSelected ? "#e3f2fd" : "transparent"}
+                >
+                    {/* Expand/Collapse Icon */}
+                    <div 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExpand(node);
+                        }}
+                        style={{ 
+                            width: 20, 
+                            cursor: "pointer", 
+                            visibility: node.hasChildren || node.children?.length > 0 ? "visible" : "hidden",
+                            transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                            transition: "transform 0.1s"
+                        }}
+                    >
+                        ▶
+                    </div>
+
+                    {/* Icon & Name */}
+                    <span style={{ marginRight: 6 }}>{node.path === "." ? "📂" : "📁"}</span>
+                    <span style={{ fontWeight: node.path === "." ? "bold" : "normal" }}>
+                        {node.name === "(root)" ? "Project Root" : node.name}
                     </span>
+
+                    {/* Signals */}
+                    {node.signals && node.signals.length > 0 && (
+                        <span style={{ marginLeft: 8, fontSize: "0.7em", background: "#e0e0e0", padding: "1px 6px", borderRadius: 4, color: "#555" }}>
+                            {node.signals.join(", ")}
+                        </span>
+                    )}
+                </div>
+
+                {/* Children */}
+                {isExpanded && (
+                    <div>
+                        {isLoading && <div style={{ paddingLeft: depth * 20 + 36, fontSize: "0.8em", color: "#888" }}>Loading...</div>}
+                        {!isLoading && children.map(child => renderNode(child, depth + 1))}
+                        {!isLoading && children.length === 0 && node.path !== "." && (
+                            <div style={{ paddingLeft: depth * 20 + 36, fontSize: "0.8em", color: "#aaa", fontStyle: "italic" }}>(empty)</div>
+                        )}
+                    </div>
                 )}
-                
-                <button onClick={() => onSelectFrontend(node.path)} style={{ fontSize: "0.7em", padding: "2px 6px" }}>
-                    Set Frontend
-                </button>
-                <button onClick={() => onSelectBackend(node.path)} style={{ fontSize: "0.7em", padding: "2px 6px" }}>
-                    Set Backend
-                </button>
             </div>
-            
-            {node.children && node.children.map((child) => (
-                <FolderTree 
-                    key={child.path} 
-                    node={child} 
-                    onSelectFrontend={onSelectFrontend} 
-                    onSelectBackend={onSelectBackend} 
-                />
-            ))}
+        );
+    };
+
+    return (
+        <div style={{ userSelect: "none" }}>
+            {renderNode(rootNode)}
         </div>
     );
 }
