@@ -45,6 +45,15 @@ model Project {
   workspacePath    String?  // Absolute path on backend
   cloneStatus      String   @default("PENDING") // PENDING, CLONED, FAILED
 
+  // Analysis / Build Config
+  analysisStatus   String   @default("PENDING") // PENDING, ANALYZED, FAILED
+  runtime          String?  // node, python, static, docker
+  packageManager   String?  // npm, yarn, pnpm, pip
+  buildCommand     String?
+  startCommand     String?
+  outputDir        String?
+  port             Int?     @default(3000)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

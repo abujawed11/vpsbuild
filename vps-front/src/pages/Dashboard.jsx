@@ -21,6 +21,7 @@ export default function Dashboard() {
     const [loadingBranches, setLoadingBranches] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState("");
     const [cloning, setCloning] = useState(false);
+    const [analyzingWorkspace, setAnalyzingWorkspace] = useState(false);
 
     const fetchRepos = async () => {
         setLoadingRepos(true);
@@ -51,6 +52,24 @@ export default function Dashboard() {
             alert("Cloning failed: " + e.message);
         } finally {
             setCloning(false);
+        }
+    };
+
+    const analyzeProject = async () => {
+        if (!selectedProject) return;
+        setAnalyzingWorkspace(true);
+        try {
+            const token = getToken();
+            const res = await apiFetch("/api/projects/analyze", {
+                method: "POST",
+                token,
+                body: { projectId: selectedProject.id }
+            });
+            setSelectedProject(res.project);
+        } catch (e) {
+            alert("Analysis failed: " + e.message);
+        } finally {
+            setAnalyzingWorkspace(false);
         }
     };
 
@@ -230,9 +249,32 @@ export default function Dashboard() {
                                         {selectedProject.cloneStatus === "CLONED" ? (
                                             <div>
                                                 <div style={{ color: "green", fontWeight: "bold" }}>Workspace Ready ✅</div>
-                                                <div style={{ marginTop: 10, color: "#666" }}>
-                                                    Next step: Generate Dockerfile & Deploy (Coming soon)
-                                                </div>
+                                                
+                                                {selectedProject.analysisStatus !== "ANALYZED" ? (
+                                                    <button 
+                                                        onClick={analyzeProject} 
+                                                        disabled={analyzingWorkspace}
+                                                        style={{ marginTop: 10, background: "#673AB7", color: "white" }}
+                                                    >
+                                                        {analyzingWorkspace ? "Analyzing..." : "Analyze Workspace"}
+                                                    </button>
+                                                ) : (
+                                                    <div style={{ marginTop: 16, background: "#f0f0f0", padding: 12, borderRadius: 8 }}>
+                                                        <h4 style={{ margin: "0 0 10px 0" }}>Deployment Plan 📋</h4>
+                                                        <div style={{ fontSize: "0.9em", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                                            <div><b>Runtime:</b> {selectedProject.runtime}</div>
+                                                            <div><b>Framework:</b> {selectedProject.framework}</div>
+                                                            <div><b>Pkg Manager:</b> {selectedProject.packageManager}</div>
+                                                            <div><b>Port:</b> {selectedProject.port}</div>
+                                                            <div style={{ gridColumn: "1 / -1" }}><b>Build Cmd:</b> {selectedProject.buildCommand || "(none)"}</div>
+                                                            <div style={{ gridColumn: "1 / -1" }}><b>Start Cmd:</b> {selectedProject.startCommand || "(none)"}</div>
+                                                        </div>
+                                                        <div style={{ marginTop: 12, color: "#666" }}>
+                                                            Next step: Generate Dockerfile & Deploy (Coming soon)
+                                                        </div>
+                                                    </div>
+                                                )}
+
                                             </div>
                                         ) : (
                                             <div>

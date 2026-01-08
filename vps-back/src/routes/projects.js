@@ -5,8 +5,57 @@ const { authRequired } = require("../middleware/auth");
 const path = require("path");
 const { detectFramework } = require("../lib/detector");
 const { cloneRepo } = require("../lib/git");
+const { analyzeWorkspace } = require("../lib/analyzer");
 
 const router = express.Router();
+
+// POST /api/projects/analyze
+router.post("/analyze", authRequired, async (req, res) => {
+  const { projectId } = req.body;
+  if (!projectId) return res.status(400).json({ error: "Missing projectId" });
+
+  try {
+    const project = await prisma.project.findUnique({
+        where: { id: projectId }
+    });
+
+    if (!project || project.userId !== req.user.id) {
+        return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (project.cloneStatus !== "CLONED" || !project.workspacePath) {
+        return res.status(400).json({ error: "Project not cloned yet" });
+    }
+
+    // Perform Analysis
+    const config = await analyzeWorkspace(project.workspacePath);
+
+    // Update DB
+    const updated = await prisma.project.update({
+        where: { id: projectId },
+        data: {
+            analysisStatus: "ANALYZED",
+            runtime: config.runtime,
+            framework: config.framework !== "unknown" ? config.framework : project.framework, // prefer deep analysis, fallback to initial detect
+            packageManager: config.packageManager,
+            buildCommand: config.buildCommand,
+            startCommand: config.startCommand,
+            outputDir: config.outputDir,
+            port: config.port
+        }
+    });
+
+    res.json({ success: true, project: updated, config });
+
+  } catch (err) {
+    console.error("Analysis failed:", err.message);
+    await prisma.project.update({
+        where: { id: projectId },
+        data: { analysisStatus: "FAILED" }
+    });
+    res.status(500).json({ error: "Failed to analyze workspace" });
+  }
+});
 
 // POST /api/projects/clone
 router.post("/clone", authRequired, async (req, res) => {
