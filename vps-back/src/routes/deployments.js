@@ -100,6 +100,10 @@ async function runBuild(project, deploymentId) {
         const releasesPath = path.join(sitePath, "releases");
         const currentReleasePath = path.join(releasesPath, deploymentId);
         
+        await updateLogs(`[INFO] Project Slug: ${project.slug}`);
+        await updateLogs(`[INFO] Repo: ${project.repoFullName}`);
+        await updateLogs(`[INFO] Publish Directory: ${currentReleasePath}`);
+        
         if (!fs.existsSync(releasesPath)) fs.mkdirSync(releasesPath, { recursive: true });
 
         await updateLogs("Copying files to release folder...");
@@ -140,6 +144,8 @@ async function runBuild(project, deploymentId) {
             await execPromise(`ln -sfn ${currentReleasePath} ${tempSymlink}`);
             await execPromise(`mv -Tf ${tempSymlink} ${currentSymlink}`);
         }
+
+        await updateLogs(`[INFO] Symlink Target: ${currentSymlink} -> ${currentReleasePath}`);
 
         await prisma.deployment.update({
             where: { id: deploymentId },
