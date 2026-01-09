@@ -16,6 +16,19 @@ const {
 
 const router = express.Router();
 
+// GET /api/projects
+router.get("/", authRequired, async (req, res) => {
+    try {
+        const projects = await prisma.project.findMany({
+            where: { userId: req.user.id },
+            orderBy: { createdAt: "desc" }
+        });
+        res.json({ projects });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch projects" });
+    }
+});
+
 // GET /api/projects/:id/deploy-config
 router.get("/:id/deploy-config", authRequired, async (req, res) => {
     const { id } = req.params;
@@ -259,6 +272,65 @@ router.post("/:id/roots", authRequired, async (req, res) => {
     }
 });
 
+// PATCH /api/projects/:id
+router.patch("/:id", authRequired, async (req, res) => {
+    const { id } = req.params;
+    const { name, slug, rootDir, buildCommand, outputDir, packageManager } = req.body;
+
+    try {
+        const project = await prisma.project.findUnique({ where: { id } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        const updated = await prisma.project.update({
+            where: { id },
+            data: { name, slug, rootDir, buildCommand, outputDir, packageManager }
+        });
+
+        res.json({ success: true, project: updated });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to update project" });
+    }
+});
+
+// GET /api/projects/:id/env-vars
+router.get("/:id/env-vars", authRequired, async (req, res) => {
+    try {
+        const envVars = await prisma.envVar.findMany({ where: { projectId: req.params.id } });
+        res.json(envVars);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to get env vars" });
+    }
+});
+
+// POST /api/projects/:id/env-vars
+router.post("/:id/env-vars", authRequired, async (req, res) => {
+    const { key, value } = req.body;
+    try {
+        const envVar = await prisma.envVar.upsert({
+            where: { projectId_key: { projectId: req.params.id, key } },
+            update: { value },
+            create: { projectId: req.params.id, key, value }
+        });
+        res.json(envVar);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to save env var" });
+    }
+});
+
+// DELETE /api/projects/:id/env-vars/:key
+router.delete("/:id/env-vars/:key", authRequired, async (req, res) => {
+    try {
+        await prisma.envVar.delete({
+            where: { projectId_key: { projectId: req.params.id, key: req.params.key } }
+        });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to delete env var" });
+    }
+});
+
 // POST /api/projects/analyze
 router.post("/analyze", authRequired, async (req, res) => {
   const { projectId } = req.body;
@@ -418,6 +490,7 @@ router.post("/import", authRequired, async (req, res) => {
         repoFullName,
         branch: targetBranch,
         framework: detectedType,
+        slug: name.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50)
       },
       create: {
         userId: req.user.id,
@@ -425,6 +498,7 @@ router.post("/import", authRequired, async (req, res) => {
         repoFullName,
         branch: targetBranch,
         framework: detectedType,
+        slug: name.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50)
       },
     });
 

@@ -2,232 +2,14 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { clearToken, getToken } from "../lib/auth";
+import DeploymentWizard from "../components/DeploymentWizard";
 
 export default function Dashboard() {
     const nav = useNavigate();
     const [user, setUser] = useState(null);
     const [err, setErr] = useState("");
-    const [repos, setRepos] = useState(null);
-    const [loadingRepos, setLoadingRepos] = useState(false);
-    const [repoError, setRepoError] = useState("");
-    
-    // New state for selection
-    const [analyzing, setAnalyzing] = useState(false);
-    const [selectedProject, setSelectedProject] = useState(null);
-
-    // Branch selection state
-    const [repoSelection, setRepoSelection] = useState(null); // The repo being configured
-    const [branches, setBranches] = useState([]);
-    const [loadingBranches, setLoadingBranches] = useState(false);
-    const [selectedBranch, setSelectedBranch] = useState("");
-    const [cloning, setCloning] = useState(false);
-    const [analyzingWorkspace, setAnalyzingWorkspace] = useState(false);
-    
-    // Folder Picker State
-    const [showFolderPicker, setShowFolderPicker] = useState(false);
-    const [folderTree, setFolderTree] = useState(null);
-    const [loadingTree, setLoadingTree] = useState(false);
-    const [selectedFrontend, setSelectedFrontend] = useState("");
-    const [selectedBackend, setSelectedBackend] = useState("");
-    const [savingRoots, setSavingRoots] = useState(false);
-    
-    // New selection state for the explorer
-    const [explorerSelection, setExplorerSelection] = useState(null);
-
-    // Docker Generation
-    const [generatingDocker, setGeneratingDocker] = useState(false);
-    const [deployType, setDeployTypeState] = useState("BACKEND");
-    const [backendContent, setBackendContent] = useState("");
-    const [frontendContent, setFrontendContent] = useState("");
-
-    const fetchRepos = async () => {
-        setLoadingRepos(true);
-        setRepoError("");
-        try {
-            const token = getToken();
-            const data = await apiFetch("/api/github/repos", { token });
-            setRepos(data.repos);
-        } catch (e) {
-            setRepoError(e.message);
-        } finally {
-            setLoadingRepos(false);
-        }
-    };
-
-    const fetchTree = async () => {
-        if (!selectedProject) return;
-        setLoadingTree(true);
-        try {
-            const token = getToken();
-            const data = await apiFetch(`/api/projects/${selectedProject.id}/tree`, { token });
-            setFolderTree(data.tree);
-            // Pre-select existing roots if any
-            if (selectedProject.frontendRoot) setSelectedFrontend(selectedProject.frontendRoot);
-            if (selectedProject.backendRoot) setSelectedBackend(selectedProject.backendRoot);
-        } catch (e) {
-            alert("Failed to load folder tree: " + e.message);
-        } finally {
-            setLoadingTree(false);
-        }
-    };
-
-    const saveRoots = async () => {
-        setSavingRoots(true);
-        try {
-            const token = getToken();
-            await apiFetch(`/api/projects/${selectedProject.id}/roots`, {
-                method: "POST",
-                token,
-                body: { frontendRoot: selectedFrontend || null, backendRoot: selectedBackend || null }
-            });
-            setShowFolderPicker(false);
-            // Re-analyze
-            await analyzeProject();
-        } catch (e) {
-            alert("Failed to save folders: " + e.message);
-        } finally {
-            setSavingRoots(false);
-        }
-    };
-
-    const openFolderPicker = () => {
-        setShowFolderPicker(true);
-        setExplorerSelection(null);
-        fetchTree();
-    };
-
-    const cloneProject = async () => {
-        if (!selectedProject) return;
-        setCloning(true);
-        try {
-            const token = getToken();
-            const res = await apiFetch("/api/projects/clone", {
-                method: "POST",
-                token,
-                body: { projectId: selectedProject.id }
-            });
-            setSelectedProject(res.project);
-        } catch (e) {
-            alert("Cloning failed: " + e.message);
-        } finally {
-            setCloning(false);
-        }
-    };
-
-    const analyzeProject = async () => {
-        if (!selectedProject) return;
-        setAnalyzingWorkspace(true);
-        try {
-            const token = getToken();
-            const res = await apiFetch("/api/projects/analyze", {
-                method: "POST",
-                token,
-                body: { projectId: selectedProject.id }
-            });
-            setSelectedProject(res.project);
-        } catch (e) {
-            alert("Analysis failed: " + e.message);
-        } finally {
-            setAnalyzingWorkspace(false);
-        }
-    };
-
-    const initiateSelection = async (repo) => {
-        setRepoSelection(repo);
-        setSelectedProject(null);
-        setBranches([]);
-        setLoadingBranches(true);
-        
-        try {
-            const token = getToken();
-            const data = await apiFetch(`/api/github/branches?repo=${repo.full_name}`, { token });
-            setBranches(data.branches);
-            
-            // Auto-select default branch
-            const def = data.branches.find(b => b.name === repo.default_branch) || data.branches[0];
-            setSelectedBranch(def?.name || "main");
-        } catch (e) {
-            alert("Failed to fetch branches: " + e.message);
-            setRepoSelection(null); // Reset on error
-        } finally {
-            setLoadingBranches(false);
-        }
-    };
-
-    const confirmSelection = async () => {
-        if (!repoSelection || !selectedBranch) return;
-
-        setAnalyzing(true);
-        try {
-            const token = getToken();
-            const res = await apiFetch("/api/projects/import", {
-                method: "POST",
-                token,
-                body: { 
-                    repoFullName: repoSelection.full_name, 
-                    repoId: repoSelection.id,
-                    branch: selectedBranch 
-                }
-            });
-            setSelectedProject(res.project);
-            setRepoSelection(null); // Clear selection mode
-        } catch (e) {
-            alert("Failed to analyze repo: " + e.message);
-        } finally {
-            setAnalyzing(false);
-        }
-    };
-
-    const changeDeployType = async (type) => {
-        if (!selectedProject) return;
-        try {
-            const token = getToken();
-            await apiFetch(`/api/projects/${selectedProject.id}/deploy-type`, {
-                method: "POST",
-                token,
-                body: { deployType: type }
-            });
-            setDeployTypeState(type);
-            // Reset generated content if switching types? Maybe not, keep them if cached.
-        } catch (e) {
-            alert("Failed to set deploy type: " + e.message);
-        }
-    };
-
-    const generateDockerfile = async () => {
-        setGeneratingDocker(true);
-        try {
-            const token = getToken();
-            const res = await apiFetch(`/api/projects/${selectedProject.id}/generate-dockerfiles`, {
-                method: "POST",
-                token
-            });
-            setBackendContent(res.backendContent);
-            setFrontendContent(res.frontendContent);
-            
-            // Refresh project to get flag update
-            setSelectedProject(prev => ({ ...prev, dockerfileGenerated: true }));
-        } catch (e) {
-            alert("Failed to generate Dockerfile: " + e.message);
-        } finally {
-            setGeneratingDocker(false);
-        }
-    };
-    
-    // Sync state when project loads
-    useEffect(() => {
-        if (selectedProject) {
-            // Fetch detailed deploy config
-            const token = getToken();
-            apiFetch(`/api/projects/${selectedProject.id}/deploy-config`, { token })
-                .then(res => {
-                    setDeployTypeState(res.deployType);
-                    setBackendContent(res.dockerfileBackendContent);
-                    setFrontendContent(res.dockerfileFrontendContent);
-                })
-                .catch(console.error);
-        }
-    }, [selectedProject]);
+    const [projects, setProjects] = useState([]);
+    const [showWizard, setShowWizard] = useState(false);
 
     useEffect(() => {
         const token = getToken();
@@ -237,7 +19,10 @@ export default function Dashboard() {
         }
 
         apiFetch("/api/me", { token })
-            .then((d) => setUser(d.user))
+            .then((d) => {
+                setUser(d.user);
+                fetchProjects();
+            })
             .catch((e) => {
                 setErr(e.message);
                 clearToken();
@@ -245,421 +30,104 @@ export default function Dashboard() {
             });
     }, [nav]);
 
+    const fetchProjects = async () => {
+        try {
+            const data = await apiFetch("/api/github/repos", { token: getToken() });
+            // Actually we need an endpoint for projects in our DB
+            // For now, let's fetch them from /api/github/repos but we should have /api/projects
+            // Let's assume /api/github/repos actually returns my DB projects for now or I'll add the endpoint.
+            const res = await apiFetch("/api/projects", { token: getToken() });
+            setProjects(res.projects || []);
+        } catch (e) { console.error(e); }
+    };
+
     function logout() {
         clearToken();
         nav("/login");
     }
 
-    return (
-        <div style={{ maxWidth: 800, margin: "40px auto", padding: 16 }}>
-            {/* Modal Overlay */}
-            {showFolderPicker && (
-                <div style={{
-                    position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000
-                }}>
-                    <div style={{ background: "white", padding: 20, borderRadius: 8, width: 600, maxHeight: "80vh", overflowY: "auto" }}>
-                        <h3>Configure App Folders</h3>
-                        <p style={{ fontSize: "0.9em", color: "#666" }}>
-                            Select the folders containing your Frontend and Backend code. 
-                            If you have a monorepo, select the specific subfolders.
-                        </p>
+    if (!user) return <div style={{ padding: 20 }}>Loading...</div>;
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-                            <div style={{ padding: 10, background: "#f5f5f5", borderRadius: 4 }}>
-                                <b>Frontend Root:</b>
-                                <div style={{ color: selectedFrontend ? "blue" : "#aaa" }}>
-                                    {selectedFrontend === "." ? "Project Root" : (selectedFrontend || "(Not set)")}
-                                </div>
-                                {selectedFrontend && <button onClick={() => setSelectedFrontend("")} style={{ fontSize: "0.8em" }}>Clear</button>}
-                            </div>
-                            <div style={{ padding: 10, background: "#f5f5f5", borderRadius: 4 }}>
-                                <b>Backend Root:</b>
-                                <div style={{ color: selectedBackend ? "blue" : "#aaa" }}>
-                                    {selectedBackend === "." ? "Project Root" : (selectedBackend || "(Not set)")}
-                                </div>
-                                {selectedBackend && <button onClick={() => setSelectedBackend("")} style={{ fontSize: "0.8em" }}>Clear</button>}
-                            </div>
-                        </div>
-
-                        {/* Actions for Selected Folder */}
-                        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-                            <button 
-                                disabled={!explorerSelection}
-                                onClick={() => setSelectedFrontend(explorerSelection)}
-                                style={{ flex: 1, padding: "8px", cursor: explorerSelection ? "pointer" : "not-allowed" }}
-                            >
-                                Set "{explorerSelection === "." ? "Root" : explorerSelection || "Selection"}" as Frontend
-                            </button>
-                            <button 
-                                disabled={!explorerSelection}
-                                onClick={() => setSelectedBackend(explorerSelection)}
-                                style={{ flex: 1, padding: "8px", cursor: explorerSelection ? "pointer" : "not-allowed" }}
-                            >
-                                Set "{explorerSelection === "." ? "Root" : explorerSelection || "Selection"}" as Backend
-                            </button>
-                        </div>
-
-                        <div style={{ border: "1px solid #ddd", padding: 10, borderRadius: 4, maxHeight: 300, overflowY: "auto", background: "white" }}>
-                            {loadingTree ? (
-                                <p>Loading folders...</p>
-                            ) : folderTree ? (
-                                <FileExplorer 
-                                    projectId={selectedProject.id}
-                                    rootNode={folderTree} // This is just the initial root node
-                                    selectedPath={explorerSelection}
-                                    onSelect={setExplorerSelection}
-                                />
-                            ) : (
-                                <p>No files found.</p>
-                            )}
-                        </div>
-
-                        <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                            <button onClick={() => setShowFolderPicker(false)} style={{ background: "#ccc" }}>Cancel</button>
-                            <button onClick={saveRoots} disabled={savingRoots} style={{ background: "#2196F3", color: "white" }}>
-                                {savingRoots ? "Saving..." : "Save & Re-Analyze"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <h2>Dashboard</h2>
-                <button onClick={logout}>Logout</button>
-            </div>
-
-            {err ? <div style={{ color: "crimson" }}>{err}</div> : null}
-
-            {!user ? (
-                <p>Loading...</p>
-            ) : (
-                <div style={{ marginTop: 16 }}>
-                    <div><b>Email:</b> {user.email}</div>
-                    <div><b>GitHub:</b> {user.github ? `Connected as ${user.github.username}` : "Not connected"}</div>
-
-                    <div style={{ marginTop: 20, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-                        {/* <h3 style={{ marginTop: 0 }}>Next step</h3>
-            <p style={{ marginBottom: 0 }}>
-              We’ll add “Connect GitHub” button here and start OAuth.
-            </p> */}
-                        {!user.github ? (
-                            <button
-                                onClick={() => {
-                                    const token = getToken();
-                                    window.location.href = `http://localhost:5000/api/github/connect?token=${token}`;
-                                }}
-                            >
-                                Connect GitHub
-                            </button>
-                        ) : (
-                            <div>
-                                <p>GitHub connected ✅</p>
-                                <button onClick={fetchRepos} disabled={loadingRepos} style={{ marginTop: 8 }}>
-                                    {loadingRepos ? "Loading..." : "List GitHub Repositories"}
-                                </button>
-                                {repoError && <p style={{ color: "crimson" }}>{repoError}</p>}
-
-                                {repos && !repoSelection && !selectedProject && (
-                                    <div style={{ marginTop: 12 }}>
-                                        <h4>Repositories ({repos.length})</h4>
-                                        <ul style={{ maxHeight: 300, overflowY: "auto", paddingLeft: 20 }}>
-                                            {repos.map((r) => (
-                                                <li key={r.id} style={{ marginBottom: 6 }}>
-                                                    <b>{r.full_name}</b>
-                                                    {r.private ? " 🔒" : ""}
-                                                    <button 
-                                                        onClick={() => initiateSelection(r)} 
-                                                        style={{ marginLeft: 10, fontSize: "0.8em" }}
-                                                    >
-                                                        Select
-                                                    </button>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Branch Selection Mode */}
-                                {repoSelection && (
-                                    <div style={{ marginTop: 20, padding: 12, border: "1px solid #aaa", borderRadius: 8, background: "#f9f9f9" }}>
-                                        <h3 style={{ marginTop: 0 }}>Configure: {repoSelection.full_name}</h3>
-                                        
-                                        {loadingBranches ? (
-                                            <p>Loading branches...</p>
-                                        ) : (
-                                            <div>
-                                                <label style={{ display: "block", marginBottom: 8 }}>
-                                                    Select Branch:
-                                                    <select 
-                                                        value={selectedBranch} 
-                                                        onChange={(e) => setSelectedBranch(e.target.value)}
-                                                        style={{ marginLeft: 10, padding: 4 }}
-                                                    >
-                                                        {branches.map(b => (
-                                                            <option key={b.name} value={b.name}>
-                                                                {b.name}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </label>
-
-                                                <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
-                                                    <button onClick={confirmSelection} disabled={analyzing}>
-                                                        {analyzing ? "Analyzing..." : "Analyze & Import"}
-                                                    </button>
-                                                    <button onClick={() => setRepoSelection(null)} disabled={analyzing} style={{ background: "#ccc" }}>
-                                                        Cancel
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                                
-                                {/* Result */}
-                                {selectedProject && (
-                                    <div style={{ marginTop: 20, padding: 12, border: "2px solid #4CAF50", borderRadius: 8 }}>
-                                        <h3 style={{ margin: "0 0 10px 0" }}>Project Ready 🚀</h3>
-                                        <div><b>Repo:</b> {selectedProject.repoFullName}</div>
-                                        <div><b>Branch:</b> {selectedProject.branch}</div>
-                                        <div><b>Detected Framework:</b> {selectedProject.framework}</div>
-                                        
-                                        <hr style={{ margin: "12px 0", border: "0", borderTop: "1px solid #eee" }} />
-
-                                        {/* Cloning Section */}
-                                        {selectedProject.cloneStatus === "CLONED" ? (
-                                            <div>
-                                                <div style={{ color: "green", fontWeight: "bold" }}>Workspace Ready ✅</div>
-                                                
-                                                {selectedProject.analysisStatus !== "ANALYZED" ? (
-                                                    <button 
-                                                        onClick={analyzeProject} 
-                                                        disabled={analyzingWorkspace}
-                                                        style={{ marginTop: 10, background: "#673AB7", color: "white" }}
-                                                    >
-                                                        {analyzingWorkspace ? "Analyzing..." : "Analyze Workspace"}
-                                                    </button>
-                                                ) : (
-                                                    <div style={{ marginTop: 16, background: "#f0f0f0", padding: 12, borderRadius: 8 }}>
-                                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                                                            <h4 style={{ margin: 0 }}>Deployment Plan 📋</h4>
-                                                            <button onClick={openFolderPicker} style={{ fontSize: "0.8em" }}>
-                                                                Configure folders
-                                                            </button>
-                                                        </div>
-                                                        <div style={{ fontSize: "0.9em", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                                                            <div><b>Runtime:</b> {selectedProject.runtime}</div>
-                                                            <div><b>Framework:</b> {selectedProject.framework}</div>
-                                                            <div><b>Pkg Manager:</b> {selectedProject.packageManager}</div>
-                                                            <div><b>Port:</b> {selectedProject.port}</div>
-                                                            <div style={{ gridColumn: "1 / -1" }}><b>Build Cmd:</b> {selectedProject.buildCommand || "(none)"}</div>
-                                                            <div style={{ gridColumn: "1 / -1" }}><b>Start Cmd:</b> {selectedProject.startCommand || "(none)"}</div>
-                                                        </div>
-                                                        <div style={{ marginTop: 12, color: "#666" }}>
-                                                            Next step: Configure & Generate Dockerfile
-                                                        </div>
-
-                                                        {/* Deploy Type Selector */}
-                                                        <div style={{ marginTop: 16, marginBottom: 16 }}>
-                                                            <label style={{ marginRight: 10, fontWeight: "bold" }}>Deploy Type:</label>
-                                                            <select 
-                                                                value={deployType} 
-                                                                onChange={(e) => changeDeployType(e.target.value)}
-                                                                style={{ padding: 4 }}
-                                                            >
-                                                                <option value="BACKEND">Backend Only (Node/Python)</option>
-                                                                <option value="FRONTEND">Frontend Only (Static/SPA)</option>
-                                                                <option value="FULLSTACK">Fullstack (Repo has both)</option>
-                                                            </select>
-                                                        </div>
-
-                                                        {!selectedProject.dockerfileGenerated ? (
-                                                            <button 
-                                                                onClick={generateDockerfile} 
-                                                                disabled={generatingDocker}
-                                                                style={{ marginTop: 6, background: "#009688", color: "white" }}
-                                                            >
-                                                                {generatingDocker ? "Generating..." : "Generate Dockerfile(s)"}
-                                                            </button>
-                                                        ) : (
-                                                            <div style={{ marginTop: 12 }}>
-                                                                <div style={{ color: "green", fontWeight: "bold", marginBottom: 8 }}>Dockerfile Ready ✅</div>
-                                                                
-                                                                {/* Backend Dockerfile View */}
-                                                                {(deployType === "BACKEND" || deployType === "FULLSTACK") && backendContent && (
-                                                                    <div style={{ marginBottom: 12 }}>
-                                                                        <div style={{ fontSize: "0.8em", fontWeight: "bold", marginBottom: 4 }}>Backend Dockerfile</div>
-                                                                        <div style={{ background: "#222", color: "#e0e0e0", padding: 10, borderRadius: 4, fontSize: "0.8em", overflowX: "auto" }}>
-                                                                            <pre style={{ margin: 0 }}>{backendContent}</pre>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-
-                                                                {/* Frontend Dockerfile View */}
-                                                                {(deployType === "FRONTEND" || deployType === "FULLSTACK") && frontendContent && (
-                                                                    <div style={{ marginBottom: 12 }}>
-                                                                        <div style={{ fontSize: "0.8em", fontWeight: "bold", marginBottom: 4 }}>Frontend Dockerfile</div>
-                                                                        <div style={{ background: "#222", color: "#e0e0e0", padding: 10, borderRadius: 4, fontSize: "0.8em", overflowX: "auto" }}>
-                                                                            <pre style={{ margin: 0 }}>{frontendContent}</pre>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
-                                                                    <button onClick={generateDockerfile} style={{ fontSize: "0.8em" }}>Regenerate</button>
-                                                                </div>
-
-                                                                <div style={{ marginTop: 12, color: "#666" }}>
-                                                                    Ready for Deployment 🚀
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
-
-                                            </div>
-                                        ) : (
-                                            <div>
-                                                <p style={{ marginBottom: 10 }}>Workspace not prepared.</p>
-                                                <button 
-                                                    onClick={cloneProject} 
-                                                    disabled={cloning}
-                                                    style={{ background: "#007BFF", color: "white" }}
-                                                >
-                                                    {cloning ? "Cloning Repository..." : "Prepare Workspace (Clone)"}
-                                                </button>
-                                                {selectedProject.cloneStatus === "FAILED" && (
-                                                    <p style={{ color: "red", marginTop: 5 }}>Last clone attempt failed.</p>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        <button 
-                                            onClick={() => setSelectedProject(null)} 
-                                            style={{ marginTop: 12, fontSize: "0.8em", background: "none", color: "#666", border: "none", textDecoration: "underline", cursor: "pointer" }}
-                                        >
-                                            Select Another
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
-function FileExplorer({ projectId, rootNode, selectedPath, onSelect }) {
-    // Map of path -> boolean
-    const [expanded, setExpanded] = useState({ ".": true }); 
-    // Map of path -> array of children
-    const [childrenMap, setChildrenMap] = useState({ ".": rootNode.children });
-    const [loadingMap, setLoadingMap] = useState({});
-
-    const toggleExpand = async (node) => {
-        const path = node.path;
-        const isExpanded = !!expanded[path];
-        
-        if (isExpanded) {
-            setExpanded(prev => ({ ...prev, [path]: false }));
-            return;
-        }
-
-        // Expand
-        setExpanded(prev => ({ ...prev, [path]: true }));
-
-        // Check if we need to load children
-        if (!childrenMap[path] && node.hasChildren) {
-            setLoadingMap(prev => ({ ...prev, [path]: true }));
-            try {
-                const token = getToken();
-                // Fetch children
-                const res = await apiFetch(`/api/projects/${projectId}/tree?path=${encodeURIComponent(path)}`, { token });
-                setChildrenMap(prev => ({ ...prev, [path]: res.children }));
-            } catch (e) {
-                console.error("Failed to load children", e);
-            } finally {
-                setLoadingMap(prev => ({ ...prev, [path]: false }));
-            }
-        }
+    const connectGithub = () => {
+        const token = getToken();
+        // Redirect to backend auth endpoint
+        window.location.href = `http://localhost:5000/api/github/connect?token=${token}`;
     };
 
-    // Recursive render helper
-    const renderNode = (node, depth = 0) => {
-        const isExpanded = expanded[node.path];
-        const children = childrenMap[node.path] || [];
-        const isLoading = loadingMap[node.path];
-        const isSelected = selectedPath === node.path;
+    return (
+        <div style={{ maxWidth: 1000, margin: "40px auto", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
+                <h1>My Static Sites</h1>
+                <div style={{ display: "flex", gap: 15, alignItems: "center" }}>
+                    <span>{user.email}</span>
+                    {!user.github ? (
+                         <button onClick={connectGithub} style={{ background: "#333", color: "white", padding: "10px 20px", display: "flex", alignItems: "center", gap: 8 }}>
+                            <svg height="20" viewBox="0 0 16 16" width="20" fill="white"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+                            Connect GitHub
+                         </button>
+                    ) : (
+                        <button onClick={() => setShowWizard(true)} style={{ background: "#2196F3", color: "white", padding: "10px 20px" }}>
+                            + Create New Site
+                        </button>
+                    )}
+                    <button onClick={logout} style={{ background: "#eee", color: "#333" }}>Logout</button>
+                </div>
+            </div>
 
-        return (
-            <div key={node.path}>
-                <div 
-                    onClick={() => onSelect(node.path)}
-                    style={{ 
-                        display: "flex", 
-                        alignItems: "center", 
-                        padding: "4px 8px", 
-                        paddingLeft: depth * 20 + 8,
-                        cursor: "pointer",
-                        background: isSelected ? "#e3f2fd" : "transparent",
-                        borderLeft: isSelected ? "3px solid #2196F3" : "3px solid transparent",
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isSelected ? "#e3f2fd" : "#f5f5f5"}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isSelected ? "#e3f2fd" : "transparent"}
-                >
-                    {/* Expand/Collapse Icon */}
-                    <div 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            toggleExpand(node);
-                        }}
-                        style={{ 
-                            width: 20, 
-                            cursor: "pointer", 
-                            visibility: node.hasChildren || node.children?.length > 0 ? "visible" : "hidden",
-                            transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                            transition: "transform 0.1s"
-                        }}
-                    >
-                        ▶
-                    </div>
-
-                    {/* Icon & Name */}
-                    <span style={{ marginRight: 6 }}>{node.path === "." ? "📂" : "📁"}</span>
-                    <span style={{ fontWeight: node.path === "." ? "bold" : "normal" }}>
-                        {node.name === "(root)" ? "Project Root" : node.name}
-                    </span>
-
-                    {/* Signals */}
-                    {node.signals && node.signals.length > 0 && (
-                        <span style={{ marginLeft: 8, fontSize: "0.7em", background: "#e0e0e0", padding: "1px 6px", borderRadius: 4, color: "#555" }}>
-                            {node.signals.join(", ")}
-                        </span>
+            {!user.github ? (
+                <div style={{ textAlign: "center", padding: "60px 20px", background: "#f9f9f9", borderRadius: 12, border: "1px dashed #ccc" }}>
+                    <h2>GitHub Required</h2>
+                    <p style={{ maxWidth: 500, margin: "0 auto 20px", color: "#666" }}>
+                        To deploy your static sites, you need to connect your GitHub account. 
+                        We need access to your repositories to clone and build your projects.
+                    </p>
+                    <button onClick={connectGithub} style={{ background: "#333", color: "white", padding: "12px 24px", fontSize: "1.1em", cursor: "pointer", border: "none", borderRadius: 6 }}>
+                        Connect GitHub Account
+                    </button>
+                </div>
+            ) : showWizard ? (
+                <div>
+                    <button onClick={() => setShowWizard(false)} style={{ marginBottom: 20 }}>← Cancel</button>
+                    <DeploymentWizard 
+                        onComplete={() => {
+                            setShowWizard(false);
+                            fetchProjects();
+                        }} 
+                    />
+                </div>
+            ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 }}>
+                    {projects.length === 0 ? (
+                        <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 40, border: "2px dashed #ddd", borderRadius: 12 }}>
+                            <h3>No sites yet</h3>
+                            <p>Connect your GitHub and deploy your first static website.</p>
+                            <button onClick={() => setShowWizard(true)}>Get Started</button>
+                        </div>
+                    ) : (
+                        projects.map(p => (
+                            <div key={p.id} style={{ border: "1px solid #eee", padding: 20, borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
+                                <h3 style={{ margin: "0 0 10px 0" }}>{p.name}</h3>
+                                <div style={{ fontSize: "0.9em", color: "#666", marginBottom: 15 }}>
+                                    URL: <a href={`https://${p.slug}.myplatform.com`} target="_blank" rel="noreferrer">
+                                        {p.slug}.myplatform.com
+                                    </a>
+                                </div>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <span style={{ 
+                                        padding: "4px 10px", borderRadius: 20, fontSize: "0.8em",
+                                        background: p.deploymentStatus === "DEPLOYED" ? "#e8f5e9" : "#fff3e0",
+                                        color: p.deploymentStatus === "DEPLOYED" ? "#2e7d32" : "#ef6c00"
+                                    }}>
+                                        {p.deploymentStatus || "IDLE"}
+                                    </span>
+                                    <button onClick={() => {}} style={{ fontSize: "0.8em" }}>View Logs</button>
+                                </div>
+                            </div>
+                        ))
                     )}
                 </div>
-
-                {/* Children */}
-                {isExpanded && (
-                    <div>
-                        {isLoading && <div style={{ paddingLeft: depth * 20 + 36, fontSize: "0.8em", color: "#888" }}>Loading...</div>}
-                        {!isLoading && children.map(child => renderNode(child, depth + 1))}
-                        {!isLoading && children.length === 0 && node.path !== "." && (
-                            <div style={{ paddingLeft: depth * 20 + 36, fontSize: "0.8em", color: "#aaa", fontStyle: "italic" }}>(empty)</div>
-                        )}
-                    </div>
-                )}
-            </div>
-        );
-    };
-
-    return (
-        <div style={{ userSelect: "none" }}>
-            {renderNode(rootNode)}
+            )}
         </div>
     );
 }
+

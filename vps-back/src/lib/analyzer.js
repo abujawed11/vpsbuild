@@ -25,88 +25,69 @@ async function analyzeWorkspace(basePath, relativePath = "") {
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
     // Package Manager
-    if (hasFile("yarn.lock")) config.packageManager = "yarn";
-    else if (hasFile("pnpm-lock.yaml")) config.packageManager = "pnpm";
+    if (hasFile("pnpm-lock.yaml")) config.packageManager = "pnpm";
+    else if (hasFile("yarn.lock")) config.packageManager = "yarn";
     else config.packageManager = "npm";
 
     // Helper to get command with correct package manager
-    const getCmd = (script) => {
-      if (config.packageManager === "yarn") {
-        return `yarn ${script}`;
-      } else if (config.packageManager === "pnpm") {
-        return `pnpm ${script}`;
-      } else {
-        return `npm run ${script}`;
-      }
+    const getInstallCmd = () => {
+      if (config.packageManager === "pnpm") return "pnpm i --frozen-lockfile";
+      if (config.packageManager === "yarn") return "yarn install --frozen-lockfile";
+      return "npm ci";
     };
+
+    const getBuildCmd = (script) => {
+      if (config.packageManager === "pnpm") return `pnpm ${script}`;
+      if (config.packageManager === "yarn") return `yarn ${script}`;
+      return `npm run ${script}`;
+    };
+
+    config.installCommand = getInstallCmd();
 
     // Framework Detection & Defaults
     if (deps["next"]) {
       config.framework = "nextjs";
-      config.buildCommand = getCmd("build");
-      config.startCommand = getCmd("start");
+      config.buildCommand = getBuildCmd("build");
       config.outputDir = ".next";
-      config.port = 3000;
+      config.isStatic = false; // Next.js usually needs SSR unless exported
     } else if (deps["vite"]) {
-      config.framework = "react-vite"; // or vue-vite
-      config.buildCommand = getCmd("build");
-      config.startCommand = getCmd("preview"); // or serve dist
+      config.framework = "vite";
+      config.buildCommand = getBuildCmd("build");
       config.outputDir = "dist";
-      config.port = 4173; // Vite preview default
+      config.isStatic = true;
     } else if (deps["react-scripts"]) {
       config.framework = "create-react-app";
-      config.buildCommand = getCmd("build");
-      config.startCommand = "npx serve -s build";
+      config.buildCommand = getBuildCmd("build");
       config.outputDir = "build";
-      config.port = 3000;
-    } else if (deps["express"]) {
-      config.framework = "express";
-      config.buildCommand = ""; // Usually none for raw node
-      config.startCommand = scripts.start || "node index.js";
-      config.outputDir = "";
-      config.port = process.env.PORT || 3000;
+      config.isStatic = true;
+    } else if (deps["@angular/core"]) {
+      config.framework = "angular";
+      config.buildCommand = getBuildCmd("build");
+      config.outputDir = "dist";
+      config.isStatic = true;
     }
 
     // Override if scripts exist
-    if (scripts.build) {
-        // preserve detected build command if it matches script name, or use generic
-        if (!config.buildCommand) config.buildCommand = getCmd("build");
+    if (scripts.build && !config.buildCommand) {
+        config.buildCommand = getBuildCmd("build");
     }
-
-    // Fallback start command
-    if (!config.startCommand) {
-        if (scripts.start) config.startCommand = getCmd("start");
-        else if (hasFile("index.js")) config.startCommand = "node index.js";
-        else if (hasFile("server.js")) config.startCommand = "node server.js";
-        else if (hasFile("app.js")) config.startCommand = "node app.js";
+    
+    if (!config.outputDir && config.isStatic) {
+        config.outputDir = "dist";
     }
 
     return config;
   }
 
-  // 2. Check for Python
-  if (hasFile("requirements.txt") || hasFile("Pipfile")) {
-    config.runtime = "python";
-    config.packageManager = "pip";
-    // TODO: deeper python analysis (flask/django)
-    if (hasFile("manage.py")) {
-        config.framework = "django";
-        config.startCommand = "gunicorn project.wsgi";
-        config.port = 8000;
-    } else if (hasFile("app.py")) {
-        config.framework = "flask";
-        config.startCommand = "gunicorn app:app";
-        config.port = 5000;
-    }
-    return config;
-  }
-
-  // 3. Static
+  // 3. Static (No package.json)
   if (hasFile("index.html")) {
     config.runtime = "static";
-    config.framework = "html";
+    config.framework = "static";
+    config.packageManager = null;
+    config.installCommand = null;
+    config.buildCommand = null;
     config.outputDir = ".";
-    config.port = 80;
+    config.isStatic = true;
     return config;
   }
 
