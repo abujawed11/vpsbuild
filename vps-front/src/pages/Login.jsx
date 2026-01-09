@@ -15,10 +15,10 @@ export default function Login() {
     setErr("");
     setLoading(true);
     try {
-      const data = await apiFetch("/api/auth/login", {
-        method: "POST",
-        body: { email, password },
-      });
+            const data = await apiFetch("/auth/login", {
+                method: "POST",
+                body: { email, password }
+            });
       setToken(data.token);
       nav("/dashboard");
     } catch (e) {

@@ -47,7 +47,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
     const fetchRepos = async () => {
         setLoading(true);
         try {
-            const data = await apiFetch("/api/github/repos", { token: getToken() });
+            const data = await apiFetch("/github/repos", { token: getToken() });
             setRepos(data.repos);
         } catch (e) { alert(e.message); }
         setLoading(false);
@@ -56,7 +56,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
     const fetchBranches = async (repo) => {
         setLoading(true);
         try {
-            const data = await apiFetch(`/api/github/branches?repo=${repo.full_name}`, { token: getToken() });
+            const data = await apiFetch(`/github/branches?repo=${repo.full_name}`, { token: getToken() });
             setBranches(data.branches);
             setSelectedBranch(repo.default_branch || data.branches[0]?.name);
         } catch (e) { alert(e.message); }
@@ -66,7 +66,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
     const createProject = async () => {
         setLoading(true);
         try {
-            const res = await apiFetch("/api/projects/import", {
+            const res = await apiFetch("/projects/import", {
                 method: "POST",
                 token: getToken(),
                 body: { 
@@ -79,8 +79,8 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
             setProjectId(res.project.id);
             
             // Clone and analyze
-            await apiFetch("/api/projects/clone", { method: "POST", token: getToken(), body: { projectId: res.project.id } });
-            const treeData = await apiFetch(`/api/projects/${res.project.id}/tree`, { token: getToken() });
+            await apiFetch("/projects/clone", { method: "POST", token: getToken(), body: { projectId: res.project.id } });
+            const treeData = await apiFetch(`/projects/${res.project.id}/tree`, { token: getToken() });
             setFolderTree(treeData.tree);
             setStep(3);
         } catch (e) { alert(e.message); }
@@ -91,13 +91,13 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
         setLoading(true);
         try {
             // Update project with rootDir first
-            await apiFetch(`/api/projects/${projectId}`, {
+            await apiFetch(`/projects/${projectId}`, {
                 method: "PATCH",
                 token: getToken(),
                 body: { rootDir: path }
             });
 
-            const res = await apiFetch("/api/projects/analyze", {
+            const res = await apiFetch("/projects/analyze", {
                 method: "POST",
                 token: getToken(),
                 body: { projectId }
@@ -116,7 +116,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
     const saveSettings = async () => {
         setLoading(true);
         try {
-            await apiFetch(`/api/projects/${projectId}`, {
+            await apiFetch(`/projects/${projectId}`, {
                 method: "PATCH",
                 token: getToken(),
                 body: { ...buildSettings }
@@ -129,7 +129,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
     const startDeploy = async () => {
         setLoading(true);
         try {
-            const res = await apiFetch(`/api/deployments/${projectId}`, {
+            const res = await apiFetch(`/deployments/${projectId}`, {
                 method: "POST",
                 token: getToken()
             });
@@ -143,7 +143,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
     const pollLogs = (id) => {
         const interval = setInterval(async () => {
             try {
-                const res = await apiFetch(`/api/deployments/status/${id}`, { token: getToken() });
+                const res = await apiFetch(`/deployments/status/${id}`, { token: getToken() });
                 setLogs(res.logs);
                 setDeployment(res);
                 if (res.status === "LIVE" || res.status === "FAILED") {

@@ -15,10 +15,10 @@ export default function Register() {
     setErr("");
     setLoading(true);
     try {
-      const data = await apiFetch("/api/auth/register", {
-        method: "POST",
-        body: { email, password },
-      });
+            const data = await apiFetch("/auth/register", {
+                method: "POST",
+                body: { email, password }
+            });
       setToken(data.token);
       nav("/dashboard");
     } catch (e) {

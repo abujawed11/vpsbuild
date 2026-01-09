@@ -18,7 +18,7 @@ export default function Dashboard() {
             return;
         }
 
-        apiFetch("/api/me", { token })
+        apiFetch("/me", { token })
             .then((d) => {
                 setUser(d.user);
                 fetchProjects();
@@ -32,11 +32,11 @@ export default function Dashboard() {
 
     const fetchProjects = async () => {
         try {
-            const data = await apiFetch("/api/github/repos", { token: getToken() });
+            const data = await apiFetch("/github/repos", { token: getToken() });
             // Actually we need an endpoint for projects in our DB
             // For now, let's fetch them from /api/github/repos but we should have /api/projects
             // Let's assume /api/github/repos actually returns my DB projects for now or I'll add the endpoint.
-            const res = await apiFetch("/api/projects", { token: getToken() });
+            const res = await apiFetch("/projects", { token: getToken() });
             setProjects(res.projects || []);
         } catch (e) { console.error(e); }
     };
