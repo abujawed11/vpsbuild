@@ -108,8 +108,8 @@ export default function Dashboard() {
                             <div key={p.id} style={{ border: "1px solid #eee", padding: 20, borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
                                 <h3 style={{ margin: "0 0 10px 0" }}>{p.name}</h3>
                                 <div style={{ fontSize: "0.9em", color: "#666", marginBottom: 15 }}>
-                                    URL: <a href={`https://${p.slug}.myplatform.com`} target="_blank" rel="noreferrer">
-                                        {p.slug}.myplatform.com
+                                    URL: <a href={`http://${p.slug}.${import.meta.env.VITE_BASE_DOMAIN || 'localhost'}`} target="_blank" rel="noreferrer">
+                                        {p.slug}.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}
                                     </a>
                                 </div>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

@@ -206,7 +206,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                                 onChange={e => setSiteSlug(e.target.value)} 
                                 style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }} 
                             />
-                            <span style={{ color: "#888" }}>.myplatform.com</span>
+                            <span style={{ color: "#888" }}>.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}</span>
                         </div>
                     </div>
                     <button onClick={() => { fetchRepos(); setStep(2); }} disabled={!siteSlug} style={primaryBtn}>
@@ -351,11 +351,11 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                         <div style={{ marginTop: 25, textAlign: "center", padding: 20, background: "#e8f5e9", borderRadius: 8, border: "1px solid #c8e6c9" }}>
                             <h2 style={{ color: "#2e7d32", marginTop: 0 }}>Deployment Live! 🎉</h2>
                             <p>Your site is up and running.</p>
-                            <a href={`https://${siteSlug}.myplatform.com`} target="_blank" rel="noreferrer" style={{ 
+                            <a href={`http://${siteSlug}.${import.meta.env.VITE_BASE_DOMAIN || 'localhost'}`} target="_blank" rel="noreferrer" style={{ 
                                 display: "inline-block", marginTop: 10, padding: "10px 20px", 
                                 background: "#2e7d32", color: "white", textDecoration: "none", borderRadius: 6, fontWeight: "bold"
                             }}>
-                                Visit {siteSlug}.myplatform.com
+                                Visit {siteSlug}.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}
                             </a>
                             <div style={{ marginTop: 15 }}>
                                 <button onClick={onComplete} style={{ background: "transparent", border: "none", textDecoration: "underline", cursor: "pointer", color: "#2e7d32" }}>Back to Dashboard</button>
