@@ -22,9 +22,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-supersecretDefault}
       STATIC_SITES_PATH: /srv/static-sites
       PORT: 5000
-      # Critical for OAuth redirects to work on VPS
-      FRONTEND_URL: http://93.127.199.118.sslip.io:8088
-      GITHUB_CALLBACK_URL: http://93.127.199.118.sslip.io:8088/api/github/callback
+      # Single source of truth for public URL
+      PUBLIC_BASE_URL: http://93.127.199.118.sslip.io:8088
     volumes:
       - ./vps-back:/app
       - /app/node_modules

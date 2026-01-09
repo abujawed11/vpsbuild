@@ -7,6 +7,13 @@ const router = express.Router();
 
 // 1) Redirect user to GitHub OAuth
 router.get("/connect", authRequired, (req, res) => {
+  if (!process.env.PUBLIC_BASE_URL) {
+    console.error("Missing PUBLIC_BASE_URL env var");
+    return res.status(500).send("Server configuration error");
+  }
+  
+  const REDIRECT_URI = `${process.env.PUBLIC_BASE_URL}/api/github/callback`;
+  
   const state = Buffer.from(JSON.stringify({
     userId: req.user.id,
     t: Date.now()
@@ -14,7 +21,7 @@ router.get("/connect", authRequired, (req, res) => {
 
   const params = new URLSearchParams({
     client_id: process.env.GITHUB_CLIENT_ID,
-    redirect_uri: process.env.GITHUB_CALLBACK_URL,
+    redirect_uri: REDIRECT_URI,
     scope: "read:user repo",
     state,
   });
@@ -26,6 +33,13 @@ router.get("/connect", authRequired, (req, res) => {
 router.get("/callback", async (req, res) => {
   const { code, state } = req.query;
   if (!code || !state) return res.status(400).send("Missing code/state");
+
+  if (!process.env.PUBLIC_BASE_URL) {
+      console.error("Missing PUBLIC_BASE_URL env var");
+      return res.status(500).send("Server configuration error");
+  }
+  
+  const REDIRECT_URI = `${process.env.PUBLIC_BASE_URL}/api/github/callback`;
 
   let parsed;
   try {
@@ -44,7 +58,7 @@ router.get("/callback", async (req, res) => {
       client_id: process.env.GITHUB_CLIENT_ID,
       client_secret: process.env.GITHUB_CLIENT_SECRET,
       code,
-      redirect_uri: process.env.GITHUB_CALLBACK_URL,
+      redirect_uri: REDIRECT_URI, // MUST MATCH EXACTLY what was sent in step 1
     },
     { headers: { Accept: "application/json" } }
   );
@@ -67,9 +81,9 @@ router.get("/callback", async (req, res) => {
     create: { userId, accessToken, githubUserId, username },
   });
 
-  // Redirect back to frontend
-  const frontend = process.env.FRONTEND_URL || "http://localhost:5173";
-  res.redirect(`${frontend}/dashboard?connected=1`);
+  // Redirect back to frontend dashboard
+  // We assume frontend is served at root of PUBLIC_BASE_URL
+  res.redirect(`${process.env.PUBLIC_BASE_URL}/dashboard?connected=1`);
 });
 
 // 3) List user repos
