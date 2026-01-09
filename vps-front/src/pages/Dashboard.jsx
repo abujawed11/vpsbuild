@@ -50,8 +50,8 @@ export default function Dashboard() {
 
     const connectGithub = () => {
         const token = getToken();
-        // Redirect to backend auth endpoint
-        window.location.href = `http://localhost:5000/api/github/connect?token=${token}`;
+        // Use relative path so it goes through Nginx (works on localhost & VPS)
+        window.location.href = `/api/github/connect?token=${token}`;
     };
 
     return (

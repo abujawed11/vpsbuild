@@ -22,21 +22,21 @@ services:
       JWT_SECRET: ${JWT_SECRET:-supersecretDefault}
       STATIC_SITES_PATH: /srv/static-sites
       PORT: 5000
+      # Critical for OAuth redirects to work on VPS
+      FRONTEND_URL: http://93.127.199.118.sslip.io:8088
+      GITHUB_CALLBACK_URL: http://93.127.199.118.sslip.io:8088/api/github/callback
     volumes:
       - ./vps-back:/app
       - /app/node_modules
       - static_sites:/srv/static-sites
-    # ✅ No public port needed (nginx will proxy internally)
-    # ports:
-    #   - "5000:5000"
     depends_on:
       - db
 
   frontend:
     build: ./vps-front
     environment:
-      # ✅ Point to nginx since nginx is the public entrypoint
-      VITE_API_URL: http://93.127.199.118.sslip.io/api
+      # Relative path allows Nginx to handle routing
+      VITE_API_BASE: /api
       VITE_BASE_DOMAIN: 93.127.199.118.sslip.io
     volumes:
       - ./vps-front:/app
