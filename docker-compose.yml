@@ -9,40 +9,41 @@ services:
       POSTGRES_DB: vpsbuilds
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432" # Expose for local Prisma Studio if needed
+    # ✅ Do NOT expose Postgres publicly on VPS
+    # ports:
+    #   - "5432:5432"
 
   backend:
     build: ./vps-back
     environment:
       DATABASE_URL: postgres://admin:password@db:5432/vpsbuilds
-      # You need to fill these in your .env file or here
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       JWT_SECRET: ${JWT_SECRET:-supersecretDefault}
-      # IMPORTANT: Path inside the container
       STATIC_SITES_PATH: /srv/static-sites
       PORT: 5000
     volumes:
       - ./vps-back:/app
       - /app/node_modules
       - static_sites:/srv/static-sites
-    ports:
-      - "5000:5000"
+    # ✅ No public port needed (nginx will proxy internally)
+    # ports:
+    #   - "5000:5000"
     depends_on:
       - db
 
   frontend:
     build: ./vps-front
-    ports:
-      - "5173:5173"
     environment:
-      # Use the sslip.io address so your browser can find the API
+      # ✅ Point to nginx since nginx is the public entrypoint
       VITE_API_URL: http://93.127.199.118.sslip.io/api
       VITE_BASE_DOMAIN: 93.127.199.118.sslip.io
     volumes:
       - ./vps-front:/app
       - /app/node_modules
+    # ✅ Do NOT expose vite dev server publicly on VPS
+    # ports:
+    #   - "5173:5173"
 
   nginx:
     image: nginx:alpine
@@ -53,6 +54,7 @@ services:
       - static_sites:/srv/static-sites
     depends_on:
       - backend
+      - frontend
 
 volumes:
   postgres_data:
