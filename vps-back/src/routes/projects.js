@@ -21,9 +21,23 @@ router.get("/", authRequired, async (req, res) => {
     try {
         const projects = await prisma.project.findMany({
             where: { userId: req.user.id },
-            orderBy: { createdAt: "desc" }
+            orderBy: { createdAt: "desc" },
+            include: {
+                deployments: {
+                    orderBy: { createdAt: "desc" },
+                    take: 1 // Get only the latest deployment
+                }
+            }
         });
-        res.json({ projects });
+
+        // Add hasDeployedVersion flag to each project
+        const projectsWithStatus = projects.map(p => ({
+            ...p,
+            latestDeployment: p.deployments[0] || null,
+            hasDeployedVersion: p.deployments.some(d => d.status === "DEPLOYED")
+        }));
+
+        res.json({ projects: projectsWithStatus });
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch projects" });
     }

@@ -104,26 +104,51 @@ export default function Dashboard() {
                             <button onClick={() => setShowWizard(true)}>Get Started</button>
                         </div>
                     ) : (
-                        projects.map(p => (
-                            <div key={p.id} style={{ border: "1px solid #eee", padding: 20, borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
-                                <h3 style={{ margin: "0 0 10px 0" }}>{p.name}</h3>
-                                <div style={{ fontSize: "0.9em", color: "#666", marginBottom: 15 }}>
-                                    URL: <a href={`http://${p.slug}.${import.meta.env.VITE_BASE_DOMAIN || 'localhost'}`} target="_blank" rel="noreferrer">
-                                        {p.slug}.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}
-                                    </a>
+                        projects.map(p => {
+                            const latestStatus = p.latestDeployment?.status || "IDLE";
+                            const isDeployed = p.hasDeployedVersion;
+
+                            // Status badge colors
+                            const statusColors = {
+                                "DEPLOYED": { bg: "#e8f5e9", color: "#2e7d32" },
+                                "BUILDING": { bg: "#e3f2fd", color: "#1565c0" },
+                                "FINALIZING": { bg: "#fff3e0", color: "#ef6c00" },
+                                "QUEUED": { bg: "#f3e5f5", color: "#7b1fa2" },
+                                "FAILED": { bg: "#ffebee", color: "#c62828" },
+                                "IDLE": { bg: "#f5f5f5", color: "#616161" }
+                            };
+
+                            const statusStyle = statusColors[latestStatus] || statusColors.IDLE;
+
+                            return (
+                                <div key={p.id} style={{ border: "1px solid #eee", padding: 20, borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
+                                    <h3 style={{ margin: "0 0 10px 0" }}>{p.name}</h3>
+                                    <div style={{ fontSize: "0.9em", color: "#666", marginBottom: 15 }}>
+                                        {isDeployed ? (
+                                            <div>
+                                                URL: <a href={`http://${p.slug}.${import.meta.env.VITE_BASE_DOMAIN || 'localhost'}`} target="_blank" rel="noreferrer" style={{ color: "#2196F3", textDecoration: "none", fontWeight: 500 }}>
+                                                    {p.slug}.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}
+                                                </a>
+                                            </div>
+                                        ) : (
+                                            <div style={{ color: "#999", fontStyle: "italic" }}>
+                                                Not deployed yet
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                        <span style={{
+                                            padding: "4px 10px", borderRadius: 20, fontSize: "0.8em",
+                                            background: statusStyle.bg,
+                                            color: statusStyle.color
+                                        }}>
+                                            {latestStatus}
+                                        </span>
+                                        <button onClick={() => {}} style={{ fontSize: "0.8em" }}>View Logs</button>
+                                    </div>
                                 </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <span style={{ 
-                                        padding: "4px 10px", borderRadius: 20, fontSize: "0.8em",
-                                        background: p.deploymentStatus === "DEPLOYED" ? "#e8f5e9" : "#fff3e0",
-                                        color: p.deploymentStatus === "DEPLOYED" ? "#2e7d32" : "#ef6c00"
-                                    }}>
-                                        {p.deploymentStatus || "IDLE"}
-                                    </span>
-                                    <button onClick={() => {}} style={{ fontSize: "0.8em" }}>View Logs</button>
-                                </div>
-                            </div>
-                        ))
+                            );
+                        })
                     )}
                 </div>
             )}

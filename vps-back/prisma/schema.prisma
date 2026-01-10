@@ -83,10 +83,10 @@ model Deployment {
   id        String   @id @default(cuid())
   projectId String
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  
-  status    String   @default("QUEUED") // QUEUED, BUILDING, LIVE, FAILED
+
+  status    String   @default("QUEUED") // QUEUED, CLONING, BUILDING, FINALIZING, DEPLOYED, FAILED
   logs      String?  // Text
-  
+
   createdAt DateTime @default(now())
   finishedAt DateTime?
 }

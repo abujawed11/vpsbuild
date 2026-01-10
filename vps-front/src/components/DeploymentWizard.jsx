@@ -146,7 +146,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                 const res = await apiFetch(`/deployments/status/${id}`, { token: getToken() });
                 setLogs(res.logs);
                 setDeployment(res);
-                if (res.status === "LIVE" || res.status === "FAILED") {
+                if (res.status === "DEPLOYED" || res.status === "FAILED") {
                     clearInterval(interval);
                 }
             } catch (e) { clearInterval(interval); }
@@ -347,12 +347,12 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                         <div style={{ height: 1 }} />
                     </div>
                     
-                    {deployment?.status === "LIVE" && (
+                    {deployment?.status === "DEPLOYED" && (
                         <div style={{ marginTop: 25, textAlign: "center", padding: 20, background: "#e8f5e9", borderRadius: 8, border: "1px solid #c8e6c9" }}>
-                            <h2 style={{ color: "#2e7d32", marginTop: 0 }}>Deployment Live! 🎉</h2>
-                            <p>Your site is up and running.</p>
-                            <a href={`http://${siteSlug}.${import.meta.env.VITE_BASE_DOMAIN || 'localhost'}`} target="_blank" rel="noreferrer" style={{ 
-                                display: "inline-block", marginTop: 10, padding: "10px 20px", 
+                            <h2 style={{ color: "#2e7d32", marginTop: 0 }}>Deployment Complete! 🎉</h2>
+                            <p>Your site is verified and live.</p>
+                            <a href={`http://${siteSlug}.${import.meta.env.VITE_BASE_DOMAIN || 'localhost'}`} target="_blank" rel="noreferrer" style={{
+                                display: "inline-block", marginTop: 10, padding: "10px 20px",
                                 background: "#2e7d32", color: "white", textDecoration: "none", borderRadius: 6, fontWeight: "bold"
                             }}>
                                 Visit {siteSlug}.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}

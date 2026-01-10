@@ -59,6 +59,76 @@ router.get("/status/:id", authRequired, async (req, res) => {
     }
 });
 
+/**
+ * Verify that a deployment is fully ready to serve traffic
+ * @returns {boolean} true if deployment is ready, false otherwise
+ */
+function verifyDeploymentReadiness(releasePath, symlinkPath) {
+    try {
+        // 1. Check release directory exists
+        if (!fs.existsSync(releasePath)) {
+            console.error(`[Verify] Release directory does not exist: ${releasePath}`);
+            return false;
+        }
+
+        // 2. Check index.html exists in release
+        const indexPath = path.join(releasePath, "index.html");
+        if (!fs.existsSync(indexPath)) {
+            console.error(`[Verify] index.html not found in release: ${indexPath}`);
+            return false;
+        }
+
+        // 3. Check symlink exists
+        if (!fs.existsSync(symlinkPath)) {
+            console.error(`[Verify] Current symlink does not exist: ${symlinkPath}`);
+            return false;
+        }
+
+        // 4. Verify symlink points to correct release (platform-specific)
+        if (process.platform === "win32") {
+            // On Windows, check if it's a junction/symlink and points to the right place
+            const stats = fs.lstatSync(symlinkPath);
+            if (!stats.isSymbolicLink() && !stats.isDirectory()) {
+                console.error(`[Verify] Current path is not a symlink or junction: ${symlinkPath}`);
+                return false;
+            }
+            // Read the target (Windows readlink can be tricky, but fs.realpathSync works)
+            const target = fs.realpathSync(symlinkPath);
+            if (target !== releasePath) {
+                console.error(`[Verify] Symlink points to wrong target. Expected: ${releasePath}, Got: ${target}`);
+                return false;
+            }
+        } else {
+            // On Linux, check symlink target
+            const stats = fs.lstatSync(symlinkPath);
+            if (!stats.isSymbolicLink()) {
+                console.error(`[Verify] Current path is not a symlink: ${symlinkPath}`);
+                return false;
+            }
+            const target = fs.readlinkSync(symlinkPath);
+            // readlinkSync returns the symlink target (might be relative or absolute)
+            const absoluteTarget = path.isAbsolute(target) ? target : path.resolve(path.dirname(symlinkPath), target);
+            if (absoluteTarget !== releasePath) {
+                console.error(`[Verify] Symlink points to wrong target. Expected: ${releasePath}, Got: ${absoluteTarget}`);
+                return false;
+            }
+        }
+
+        // 5. Verify index.html is readable through symlink
+        const symlinkIndexPath = path.join(symlinkPath, "index.html");
+        if (!fs.existsSync(symlinkIndexPath)) {
+            console.error(`[Verify] index.html not accessible through symlink: ${symlinkIndexPath}`);
+            return false;
+        }
+
+        console.log(`[Verify] All checks passed for deployment at ${releasePath}`);
+        return true;
+    } catch (error) {
+        console.error(`[Verify] Error during verification: ${error.message}`);
+        return false;
+    }
+}
+
 async function runBuild(project, deploymentId) {
     const updateLogs = async (logLine) => {
         console.log(`[Deploy ${deploymentId}] ${logLine}`);
@@ -70,11 +140,20 @@ async function runBuild(project, deploymentId) {
     };
 
     try {
+        // ============================================
+        // PHASE 1: BUILD
+        // ============================================
         await prisma.deployment.update({ where: { id: deploymentId }, data: { status: "BUILDING" } });
-        
+        await updateLogs("=== BUILD PHASE ===");
+        await updateLogs(`[INFO] Project: ${project.name}`);
+        await updateLogs(`[INFO] Repository: ${project.repoFullName}`);
+        await updateLogs(`[INFO] Branch: ${project.branch}`);
+        await updateLogs(`[INFO] Slug: ${project.slug}`);
+
         const projectRoot = path.join(project.workspacePath, project.rootDir || "");
-        
-        // 2. Build Pipeline
+        await updateLogs(`[INFO] Workspace: ${projectRoot}`);
+
+        // Build Pipeline
         if (project.packageManager && project.buildCommand) {
             await updateLogs(`Running install: ${project.packageManager}...`);
             const installCmd = project.packageManager === "pnpm" ? "pnpm i" : (project.packageManager === "yarn" ? "yarn install" : "npm ci");
@@ -87,24 +166,34 @@ async function runBuild(project, deploymentId) {
             projectEnvVars.forEach(ev => { env[ev.key] = ev.value; });
 
             await execPromise(project.buildCommand, { cwd: projectRoot, env });
+            await updateLogs("Build completed successfully.");
+        } else {
+            await updateLogs("No build command specified, using workspace as-is.");
         }
 
-        // 3. Validate Output
+        // Validate Output
         const outputFullPath = path.join(projectRoot, project.outputDir || ".");
         if (!fs.existsSync(outputFullPath)) {
             throw new Error(`Output directory not found: ${project.outputDir}`);
         }
+        await updateLogs(`[INFO] Output directory: ${outputFullPath}`);
 
-        // 4. Publish (Atomic Symlink Swap)
+        // ============================================
+        // PHASE 2: FINALIZING (Atomic Deployment)
+        // ============================================
+        await prisma.deployment.update({ where: { id: deploymentId }, data: { status: "FINALIZING" } });
+        await updateLogs("=== FINALIZE PHASE ===");
+
         const sitePath = path.join(BASE_STATIC_PATH, project.slug);
         const releasesPath = path.join(sitePath, "releases");
         const currentReleasePath = path.join(releasesPath, deploymentId);
-        
-        await updateLogs(`[INFO] Project Slug: ${project.slug}`);
-        await updateLogs(`[INFO] Repo: ${project.repoFullName}`);
-        await updateLogs(`[INFO] Publish Directory: ${currentReleasePath}`);
-        
-        if (!fs.existsSync(releasesPath)) fs.mkdirSync(releasesPath, { recursive: true });
+
+        await updateLogs(`[INFO] Release path: ${currentReleasePath}`);
+
+        if (!fs.existsSync(releasesPath)) {
+            fs.mkdirSync(releasesPath, { recursive: true });
+            await updateLogs(`Created releases directory: ${releasesPath}`);
+        }
 
         await updateLogs("Copying files to release folder...");
         // Use recursive copy
@@ -113,48 +202,93 @@ async function runBuild(project, deploymentId) {
         } else {
             await execPromise(`cp -R "${outputFullPath}/." "${currentReleasePath}"`);
         }
+        await updateLogs(`Files copied to: ${currentReleasePath}`);
 
         // Check index.html
-        if (!fs.existsSync(path.join(currentReleasePath, "index.html"))) {
+        const indexHtmlPath = path.join(currentReleasePath, "index.html");
+        if (!fs.existsSync(indexHtmlPath)) {
+            await updateLogs("[WARN] index.html not found at root, checking for nested structure...");
             // Check for Angular subfolder case
             const files = fs.readdirSync(currentReleasePath);
             if (files.length === 1 && fs.lstatSync(path.join(currentReleasePath, files[0])).isDirectory()) {
                 const subDir = path.join(currentReleasePath, files[0]);
                 if (fs.existsSync(path.join(subDir, "index.html"))) {
-                    await updateLogs(`Auto-detected Angular subfolder: ${files[0]}`);
+                    await updateLogs(`[INFO] Auto-detected nested build output in: ${files[0]}`);
                     // Move files up
-                    await execPromise(process.platform === "win32" ? `xcopy /E /I /Y "${subDir}" "${currentReleasePath}" && rd /S /Q "${subDir}"` : `mv ${subDir}/* ${currentReleasePath}/ && rm -rf ${subDir}`);
+                    if (process.platform === "win32") {
+                        await execPromise(`xcopy /E /I /Y "${subDir}\\*" "${currentReleasePath}" && rd /S /Q "${subDir}"`);
+                    } else {
+                        await execPromise(`mv ${subDir}/* ${currentReleasePath}/ && rm -rf ${subDir}`);
+                    }
+                    await updateLogs("Files moved to root level.");
+                } else {
+                    throw new Error("index.html not found in output directory or nested folder.");
                 }
             } else {
                 throw new Error("index.html not found in output directory.");
             }
+        } else {
+            await updateLogs(`[OK] index.html found at: ${indexHtmlPath}`);
         }
 
-        await updateLogs("Updating symlink...");
+        // Atomic symlink creation
+        await updateLogs("Creating symlink (atomic)...");
         const currentSymlink = path.join(sitePath, "current");
-        
+
         if (process.platform === "win32") {
-            // Windows symlinks are tricky, sometimes it's better to just use a junction or copy for local dev
+            // Windows: Use temp symlink + rename for atomicity
+            const tempSymlink = path.join(sitePath, `current_tmp_${Date.now()}`);
+
+            // Create temp symlink
+            await execPromise(`mklink /D "${tempSymlink}" "${currentReleasePath}"`);
+
+            // Atomic rename (delete old if exists, then rename)
             if (fs.existsSync(currentSymlink)) {
                 await execPromise(`rmdir "${currentSymlink}"`);
             }
-            await execPromise(`mklink /D "${currentSymlink}" "${currentReleasePath}"`);
+            // On Windows, we need to use move instead of atomic rename
+            await execPromise(`move "${tempSymlink}" "${currentSymlink}"`);
+
+            await updateLogs(`[OK] Symlink created: ${currentSymlink} -> ${currentReleasePath}`);
         } else {
-            const tempSymlink = path.join(sitePath, "current_tmp");
+            // Linux: Atomic symlink swap
+            const tempSymlink = path.join(sitePath, `current_tmp_${Date.now()}`);
             await execPromise(`ln -sfn ${currentReleasePath} ${tempSymlink}`);
             await execPromise(`mv -Tf ${tempSymlink} ${currentSymlink}`);
+            await updateLogs(`[OK] Symlink created (atomic): ${currentSymlink} -> ${currentReleasePath}`);
         }
 
-        await updateLogs(`[INFO] Symlink Target: ${currentSymlink} -> ${currentReleasePath}`);
+        // ============================================
+        // PHASE 3: VERIFICATION
+        // ============================================
+        await updateLogs("=== VERIFICATION PHASE ===");
+        await updateLogs("Verifying deployment readiness...");
 
+        const isReady = verifyDeploymentReadiness(currentReleasePath, currentSymlink);
+
+        if (!isReady) {
+            throw new Error("Deployment verification failed. Site is not ready to serve traffic.");
+        }
+
+        await updateLogs("[OK] Release directory exists");
+        await updateLogs("[OK] index.html exists in release");
+        await updateLogs("[OK] Symlink exists and points correctly");
+        await updateLogs("[OK] Site is accessible through symlink");
+
+        // ============================================
+        // PHASE 4: MARK AS DEPLOYED
+        // ============================================
         await prisma.deployment.update({
             where: { id: deploymentId },
-            data: { status: "LIVE", finishedAt: new Date() }
+            data: { status: "DEPLOYED", finishedAt: new Date() }
         });
-        await updateLogs("Deployment successful! Site is LIVE.");
+        await updateLogs("=== DEPLOYMENT COMPLETE ===");
+        await updateLogs(`✓ Your site is now live at: http://${project.slug}.${process.env.BASE_DOMAIN || 'localhost'}`);
+        await updateLogs(`✓ Deployment ID: ${deploymentId}`);
 
     } catch (err) {
-        await updateLogs(`Error: ${err.message}`);
+        await updateLogs(`[ERROR] ${err.message}`);
+        await updateLogs("Deployment failed. Please check logs above for details.");
         await prisma.deployment.update({
             where: { id: deploymentId },
             data: { status: "FAILED", finishedAt: new Date() }
