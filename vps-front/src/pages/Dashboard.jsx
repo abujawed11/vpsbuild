@@ -41,6 +41,31 @@ export default function Dashboard() {
         } catch (e) { console.error(e); }
     };
 
+    const deleteProject = async (projectId, projectName) => {
+        const confirmed = window.confirm(
+            `Are you sure you want to delete "${projectName}"?\n\n` +
+            `This will permanently delete:\n` +
+            `• All deployments and logs\n` +
+            `• All environment variables\n` +
+            `• All deployed files and releases\n` +
+            `• The cloned repository workspace\n\n` +
+            `This action cannot be undone!`
+        );
+
+        if (!confirmed) return;
+
+        try {
+            await apiFetch(`/projects/${projectId}`, {
+                method: "DELETE",
+                token: getToken()
+            });
+            // Refresh project list
+            fetchProjects();
+        } catch (e) {
+            alert(`Failed to delete project: ${e.message}`);
+        }
+    };
+
     function logout() {
         clearToken();
         nav("/login");
@@ -120,14 +145,19 @@ export default function Dashboard() {
 
                             const statusStyle = statusColors[latestStatus] || statusColors.IDLE;
 
+                            // Build site URL
+                            const domain = import.meta.env.VITE_BASE_DOMAIN || 'localhost';
+                            const port = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : '';
+                            const siteUrl = `http://${p.slug}.${domain}${port}`;
+
                             return (
                                 <div key={p.id} style={{ border: "1px solid #eee", padding: 20, borderRadius: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
                                     <h3 style={{ margin: "0 0 10px 0" }}>{p.name}</h3>
                                     <div style={{ fontSize: "0.9em", color: "#666", marginBottom: 15 }}>
                                         {isDeployed ? (
                                             <div>
-                                                URL: <a href={`http://${p.slug}.${import.meta.env.VITE_BASE_DOMAIN || 'localhost'}`} target="_blank" rel="noreferrer" style={{ color: "#2196F3", textDecoration: "none", fontWeight: 500 }}>
-                                                    {p.slug}.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}
+                                                URL: <a href={siteUrl} target="_blank" rel="noreferrer" style={{ color: "#2196F3", textDecoration: "none", fontWeight: 500 }}>
+                                                    {p.slug}.{domain}{port}
                                                 </a>
                                             </div>
                                         ) : (
@@ -144,7 +174,23 @@ export default function Dashboard() {
                                         }}>
                                             {latestStatus}
                                         </span>
-                                        <button onClick={() => {}} style={{ fontSize: "0.8em" }}>View Logs</button>
+                                        <div style={{ display: "flex", gap: 8 }}>
+                                            <button onClick={() => {}} style={{ fontSize: "0.8em", padding: "4px 8px" }}>View Logs</button>
+                                            <button
+                                                onClick={() => deleteProject(p.id, p.name)}
+                                                style={{
+                                                    fontSize: "0.8em",
+                                                    padding: "4px 8px",
+                                                    background: "#ffebee",
+                                                    color: "#c62828",
+                                                    border: "1px solid #ef9a9a",
+                                                    cursor: "pointer"
+                                                }}
+                                                title="Delete project and all files"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             );

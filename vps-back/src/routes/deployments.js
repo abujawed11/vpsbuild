@@ -283,7 +283,16 @@ async function runBuild(project, deploymentId) {
             data: { status: "DEPLOYED", finishedAt: new Date() }
         });
         await updateLogs("=== DEPLOYMENT COMPLETE ===");
-        await updateLogs(`✓ Your site is now live at: http://${project.slug}.${process.env.BASE_DOMAIN || 'localhost'}`);
+
+        // Get base domain from environment (without protocol or port)
+        const baseDomain = process.env.VITE_BASE_DOMAIN || process.env.BASE_DOMAIN || 'localhost';
+        const publicUrl = process.env.PUBLIC_BASE_URL || `http://${baseDomain}`;
+        // Extract domain and port from PUBLIC_BASE_URL if set
+        const urlMatch = publicUrl.match(/^https?:\/\/([^:\/]+)(:\d+)?/);
+        const domain = urlMatch ? urlMatch[1] : baseDomain;
+        const port = urlMatch && urlMatch[2] ? urlMatch[2] : '';
+
+        await updateLogs(`✓ Your site is now live at: http://${project.slug}.${domain}${port}`);
         await updateLogs(`✓ Deployment ID: ${deploymentId}`);
 
     } catch (err) {

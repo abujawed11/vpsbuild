@@ -3,15 +3,17 @@ const axios = require("axios");
 const { prisma } = require("../db/prisma");
 const { authRequired } = require("../middleware/auth");
 const path = require("path");
+const fs = require("fs").promises;
+const fsSync = require("fs");
 const { detectFramework } = require("../lib/detector");
 const { cloneRepo } = require("../lib/git");
 const { analyzeWorkspace } = require("../lib/analyzer");
 const { getDirectoryChildren } = require("../lib/file-utils");
-const { 
-    generateNodeBackendDockerfile, 
-    generatePythonBackendDockerfile, 
-    generateFrontendDockerfile, 
-    writeDockerfile 
+const {
+    generateNodeBackendDockerfile,
+    generatePythonBackendDockerfile,
+    generateFrontendDockerfile,
+    writeDockerfile
 } = require("../lib/docker-generator");
 
 const router = express.Router();
@@ -308,6 +310,65 @@ router.patch("/:id", authRequired, async (req, res) => {
     }
 });
 
+// DELETE /api/projects/:id
+// Deletes project from database and cleans up all associated files
+router.delete("/:id", authRequired, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // 1. Verify ownership
+        const project = await prisma.project.findUnique({
+            where: { id },
+            include: { deployments: true }
+        });
+
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        console.log(`[Delete] Starting deletion for project: ${project.name} (${project.id})`);
+
+        // 2. Delete static site files (releases + symlink)
+        if (project.slug) {
+            const staticSitePath = path.join(
+                process.env.STATIC_SITES_PATH || "/srv/static-sites",
+                project.slug
+            );
+
+            if (fsSync.existsSync(staticSitePath)) {
+                console.log(`[Delete] Removing static site directory: ${staticSitePath}`);
+                await fs.rm(staticSitePath, { recursive: true, force: true });
+                console.log(`[Delete] Static site directory removed successfully`);
+            } else {
+                console.log(`[Delete] Static site directory not found: ${staticSitePath}`);
+            }
+        }
+
+        // 3. Delete workspace (cloned repo)
+        if (project.workspacePath && fsSync.existsSync(project.workspacePath)) {
+            console.log(`[Delete] Removing workspace: ${project.workspacePath}`);
+            await fs.rm(project.workspacePath, { recursive: true, force: true });
+            console.log(`[Delete] Workspace removed successfully`);
+        } else {
+            console.log(`[Delete] Workspace not found or not set`);
+        }
+
+        // 4. Delete from database (cascades to deployments and envVars)
+        console.log(`[Delete] Removing project from database`);
+        await prisma.project.delete({ where: { id } });
+        console.log(`[Delete] Project deleted successfully from database`);
+
+        res.json({
+            success: true,
+            message: "Project and all associated files deleted successfully"
+        });
+
+    } catch (err) {
+        console.error("[Delete] Error:", err.message);
+        res.status(500).json({ error: "Failed to delete project" });
+    }
+});
+
 // GET /api/projects/:id/env-vars
 router.get("/:id/env-vars", authRequired, async (req, res) => {
     try {
@@ -460,9 +521,9 @@ router.post("/clone", authRequired, async (req, res) => {
 });
 
 // POST /api/projects/import
-// Input: { repoFullName: "user/repo", repoId: 12345, branch: "main" }
+// Input: { repoFullName: "user/repo", repoId: 12345, branch: "main", name: "...", slug: "..." }
 router.post("/import", authRequired, async (req, res) => {
-  const { repoFullName, repoId, branch } = req.body;
+  const { repoFullName, repoId, branch, name: customName, slug: customSlug } = req.body;
 
   if (!repoFullName) {
     return res.status(400).json({ error: "Missing repoFullName" });
@@ -490,29 +551,30 @@ router.post("/import", authRequired, async (req, res) => {
     const detectedType = await detectFramework(repoFullName, account.accessToken, targetBranch);
 
     // 4. Save to Database
-    // Use repo name as project name (ensure uniqueness for user)
-    const name = repoInfo.name;
+    // Use custom name/slug if provided, otherwise fall back to repo name
+    const projectName = customName || repoInfo.name;
+    const projectSlug = customSlug || projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50);
 
     const project = await prisma.project.upsert({
       where: {
         userId_name: {
           userId: req.user.id,
-          name: name,
+          name: projectName,
         },
       },
       update: {
         repoFullName,
         branch: targetBranch,
         framework: detectedType,
-        slug: name.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50)
+        slug: projectSlug
       },
       create: {
         userId: req.user.id,
-        name: name,
+        name: projectName,
         repoFullName,
         branch: targetBranch,
         framework: detectedType,
-        slug: name.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50)
+        slug: projectSlug
       },
     });
 

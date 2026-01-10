@@ -18,6 +18,7 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
 
     // Step 3: Select Root
     const [projectId, setProjectId] = useState(null);
+    const [projectData, setProjectData] = useState(null);
     const [folderTree, setFolderTree] = useState(null);
     const [selectedRoot, setSelectedRoot] = useState("/");
 
@@ -77,7 +78,8 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                 }
             });
             setProjectId(res.project.id);
-            
+            setProjectData(res.project);
+
             // Clone and analyze
             await apiFetch("/projects/clone", { method: "POST", token: getToken(), body: { projectId: res.project.id } });
             const treeData = await apiFetch(`/projects/${res.project.id}/tree`, { token: getToken() });
@@ -347,21 +349,28 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                         <div style={{ height: 1 }} />
                     </div>
                     
-                    {deployment?.status === "DEPLOYED" && (
-                        <div style={{ marginTop: 25, textAlign: "center", padding: 20, background: "#e8f5e9", borderRadius: 8, border: "1px solid #c8e6c9" }}>
-                            <h2 style={{ color: "#2e7d32", marginTop: 0 }}>Deployment Complete! 🎉</h2>
-                            <p>Your site is verified and live.</p>
-                            <a href={`http://${siteSlug}.${import.meta.env.VITE_BASE_DOMAIN || 'localhost'}`} target="_blank" rel="noreferrer" style={{
-                                display: "inline-block", marginTop: 10, padding: "10px 20px",
-                                background: "#2e7d32", color: "white", textDecoration: "none", borderRadius: 6, fontWeight: "bold"
-                            }}>
-                                Visit {siteSlug}.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}
-                            </a>
-                            <div style={{ marginTop: 15 }}>
-                                <button onClick={onComplete} style={{ background: "transparent", border: "none", textDecoration: "underline", cursor: "pointer", color: "#2e7d32" }}>Back to Dashboard</button>
+                    {deployment?.status === "DEPLOYED" && (() => {
+                        const slug = projectData?.slug || siteSlug;
+                        const domain = import.meta.env.VITE_BASE_DOMAIN || 'localhost';
+                        const port = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : '';
+                        const siteUrl = `http://${slug}.${domain}${port}`;
+
+                        return (
+                            <div style={{ marginTop: 25, textAlign: "center", padding: 20, background: "#e8f5e9", borderRadius: 8, border: "1px solid #c8e6c9" }}>
+                                <h2 style={{ color: "#2e7d32", marginTop: 0 }}>Deployment Complete! 🎉</h2>
+                                <p>Your site is verified and live.</p>
+                                <a href={siteUrl} target="_blank" rel="noreferrer" style={{
+                                    display: "inline-block", marginTop: 10, padding: "10px 20px",
+                                    background: "#2e7d32", color: "white", textDecoration: "none", borderRadius: 6, fontWeight: "bold"
+                                }}>
+                                    Visit {slug}.{domain}{port}
+                                </a>
+                                <div style={{ marginTop: 15 }}>
+                                    <button onClick={onComplete} style={{ background: "transparent", border: "none", textDecoration: "underline", cursor: "pointer", color: "#2e7d32" }}>Back to Dashboard</button>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
                     {deployment?.status === "FAILED" && (
                         <div style={{ marginTop: 20, textAlign: "center", color: "crimson" }}>
                             <h3>Deployment Failed ❌</h3>
