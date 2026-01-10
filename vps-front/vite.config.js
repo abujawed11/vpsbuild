@@ -14,5 +14,11 @@ export default defineConfig({
       '93.127.199.118',
       'localhost',
     ],
+    proxy: {
+      '/api': {
+        target: 'http://backend:5000',
+        changeOrigin: true,
+      },
+    },
   },
 })

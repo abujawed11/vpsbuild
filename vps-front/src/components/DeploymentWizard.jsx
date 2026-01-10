@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { getToken } from "../lib/auth";
 import { apiFetch } from "../lib/api";
 
-export default function DeploymentWizard({ onComplete, onCancel }) {
+export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     
     // Step 1: Create Site
     const [siteName, setSiteName] = useState("");
     const [siteSlug, setSiteSlug] = useState("");
+    const [siteType, setSiteType] = useState("static"); // static, server
     
     // Step 2: Choose Source
     const [repos, setRepos] = useState([]);
@@ -74,7 +75,8 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                     repoFullName: selectedRepo.full_name, 
                     branch: selectedBranch,
                     name: siteName,
-                    slug: siteSlug
+                    slug: siteSlug,
+                    groupId
                 }
             });
             setProjectId(res.project.id);
@@ -97,6 +99,14 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                 method: "PATCH",
                 token: getToken(),
                 body: { rootDir: path }
+            });
+            
+            // Set deployType based on selection
+            const deployType = siteType === "server" ? "BACKEND" : "FRONTEND";
+            await apiFetch(`/projects/${projectId}/deploy-type`, {
+                method: "POST",
+                token: getToken(),
+                body: { deployType }
             });
 
             const res = await apiFetch("/projects/analyze", {
@@ -189,6 +199,33 @@ export default function DeploymentWizard({ onComplete, onCancel }) {
                 <div className="fade-in">
                     <h3 style={stepTitle}>Step 1: Name Your Site</h3>
                     <p style={stepDesc}>Give your project a name. We'll generate a unique URL for it.</p>
+                    
+                    <div style={{ marginBottom: 20 }}>
+                        <label style={labelStyle}>Project Type</label>
+                        <div style={{ display: "flex", gap: 10 }}>
+                             <button 
+                                onClick={() => setSiteType("static")}
+                                style={{
+                                    flex: 1, padding: 15, borderRadius: 8, border: siteType === "static" ? "2px solid #2196F3" : "1px solid #ddd",
+                                    background: siteType === "static" ? "#e3f2fd" : "white", cursor: "pointer", textAlign: "center"
+                                }}
+                             >
+                                <strong>Static Website</strong>
+                                <div style={{ fontSize: "0.8em", color: "#666" }}>React, Vue, Static HTML</div>
+                             </button>
+                             <button 
+                                onClick={() => setSiteType("server")}
+                                style={{
+                                    flex: 1, padding: 15, borderRadius: 8, border: siteType === "server" ? "2px solid #2196F3" : "1px solid #ddd",
+                                    background: siteType === "server" ? "#e3f2fd" : "white", cursor: "pointer", textAlign: "center"
+                                }}
+                             >
+                                <strong>Host Server</strong>
+                                <div style={{ fontSize: "0.8em", color: "#666" }}>Node.js, Python, Docker</div>
+                             </button>
+                        </div>
+                    </div>
+
                     <div style={{ marginBottom: 20 }}>
                         <label style={labelStyle}>Site Name</label>
                         <input 

@@ -6,6 +6,7 @@ const authRoutes = require("./routes/auth");
 const meRoutes = require("./routes/me");
 const githubRoutes = require("./routes/github");
 const projectRoutes = require("./routes/projects");
+const groupRoutes = require("./routes/groups");
 const deploymentRoutes = require("./routes/deployments");
 
 const app = express();
@@ -16,6 +17,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/me", meRoutes);
 app.use("/api/github", githubRoutes);
 app.use("/api/projects", projectRoutes);
+app.use("/api/groups", groupRoutes);
 app.use("/api/deployments", deploymentRoutes);
 
 const port = Number(process.env.PORT || 5000);

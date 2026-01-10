@@ -523,7 +523,7 @@ router.post("/clone", authRequired, async (req, res) => {
 // POST /api/projects/import
 // Input: { repoFullName: "user/repo", repoId: 12345, branch: "main", name: "...", slug: "..." }
 router.post("/import", authRequired, async (req, res) => {
-  const { repoFullName, repoId, branch, name: customName, slug: customSlug } = req.body;
+  const { repoFullName, repoId, branch, name: customName, slug: customSlug, groupId } = req.body;
 
   if (!repoFullName) {
     return res.status(400).json({ error: "Missing repoFullName" });
@@ -566,7 +566,8 @@ router.post("/import", authRequired, async (req, res) => {
         repoFullName,
         branch: targetBranch,
         framework: detectedType,
-        slug: projectSlug
+        slug: projectSlug,
+        groupId: groupId || null
       },
       create: {
         userId: req.user.id,
@@ -574,7 +575,8 @@ router.post("/import", authRequired, async (req, res) => {
         repoFullName,
         branch: targetBranch,
         framework: detectedType,
-        slug: projectSlug
+        slug: projectSlug,
+        groupId: groupId || null
       },
     });
 
