@@ -149,4 +149,21 @@ router.get("/branches", authRequired, async (req, res) => {
   }
 });
 
+// 5) Disconnect GitHub account
+router.post("/disconnect", authRequired, async (req, res) => {
+  try {
+    await prisma.githubAccount.delete({
+      where: { userId: req.user.id }
+    });
+    res.json({ success: true });
+  } catch (err) {
+    if (err.code === 'P2025') {
+       // Record to delete does not exist.
+       return res.json({ success: true });
+    }
+    console.error("Disconnect error:", err);
+    res.status(500).json({ error: "Failed to disconnect GitHub account" });
+  }
+});
+
 module.exports = router;
