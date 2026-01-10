@@ -6,6 +6,9 @@ const path = require("path");
 const fs = require("fs");
 const util = require("util");
 const execPromise = util.promisify(exec);
+const { generateDockerCompose, writeDockerCompose } = require("../lib/docker-compose-generator");
+const { generateNodeBackendDockerfile, generatePythonBackendDockerfile, writeDockerfile } = require("../lib/docker-generator");
+const { writeNginxConfig, reloadNginx, healthCheckFromNginx } = require("../lib/nginx-config-generator");
 
 const router = express.Router();
 
@@ -38,8 +41,12 @@ router.post("/:projectId", authRequired, async (req, res) => {
             }
         });
 
-        // Trigger build process (async)
-        runBuild(project, deployment.id).catch(console.error);
+        // Trigger build process (async) - route based on deploy type
+        if (project.deployType === "BACKEND") {
+            runServerDeploy(project, deployment.id).catch(console.error);
+        } else {
+            runBuild(project, deployment.id).catch(console.error);
+        }
 
         res.json({ success: true, deploymentId: deployment.id });
     } catch (err) {
@@ -126,6 +133,153 @@ function verifyDeploymentReadiness(releasePath, symlinkPath) {
     } catch (error) {
         console.error(`[Verify] Error during verification: ${error.message}`);
         return false;
+    }
+}
+
+async function runServerDeploy(project, deploymentId) {
+    const updateLogs = async (logLine) => {
+        console.log(`[Deploy ${deploymentId}] ${logLine}`);
+        const current = await prisma.deployment.findUnique({ where: { id: deploymentId } });
+        await prisma.deployment.update({
+            where: { id: deploymentId },
+            data: { logs: (current.logs || "") + "\n" + logLine }
+        });
+    };
+
+    try {
+        // ============================================
+        // PHASE 1: PREPARE DOCKERFILE
+        // ============================================
+        await prisma.deployment.update({ where: { id: deploymentId }, data: { status: "BUILDING" } });
+        await updateLogs("=== SERVER DEPLOYMENT ===");
+        await updateLogs(`[INFO] Project: ${project.name}`);
+        await updateLogs(`[INFO] Repository: ${project.repoFullName}`);
+        await updateLogs(`[INFO] Branch: ${project.branch}`);
+        await updateLogs(`[INFO] Slug: ${project.slug}`);
+
+        const projectRoot = path.join(project.workspacePath, project.rootDir || "");
+        await updateLogs(`[INFO] Workspace: ${projectRoot}`);
+
+        // Check if Dockerfile exists, if not, generate one
+        const dockerfilePath = path.join(projectRoot, "Dockerfile");
+        if (!fs.existsSync(dockerfilePath)) {
+            await updateLogs("Generating Dockerfile...");
+
+            // Detect runtime and generate appropriate Dockerfile
+            const runtime = project.runtime || "node";
+            const config = {
+                packageManager: project.packageManager || "npm",
+                startCommand: project.startCommand || "npm start",
+                port: project.port || 3000
+            };
+
+            let dockerfileContent;
+            if (runtime === "python") {
+                dockerfileContent = generatePythonBackendDockerfile(config);
+            } else {
+                dockerfileContent = generateNodeBackendDockerfile(config);
+            }
+
+            await writeDockerfile(dockerfileContent, projectRoot);
+            await updateLogs("Dockerfile generated successfully");
+        } else {
+            await updateLogs("Using existing Dockerfile");
+        }
+
+        // ============================================
+        // PHASE 2: BUILD IMAGE
+        // ============================================
+        await updateLogs("=== BUILDING IMAGE ===");
+        const imageTag = `${project.slug}:latest`;
+
+        try {
+            await execPromise(`docker build -t ${imageTag} "${projectRoot}"`, { timeout: 300000 });
+            await updateLogs("Image built successfully");
+        } catch (err) {
+            throw new Error(`Docker build failed: ${err.message}`);
+        }
+
+        // Stop old container
+        await updateLogs("Stopping old container...");
+        await execPromise(`docker stop ${project.slug}`).catch(() => {});
+        await execPromise(`docker rm ${project.slug}`).catch(() => {});
+
+        // Get environment variables
+        const envVars = await prisma.envVar.findMany({ where: { projectId: project.id } });
+        const envFlags = envVars.map(ev => `-e ${ev.key}="${ev.value}"`).join(' ');
+        const portEnv = `-e PORT=${project.port || 3000} -e NODE_ENV=production`;
+
+        // Run container WITHOUT port publishing
+        await updateLogs("=== STARTING CONTAINER ===");
+        const runCmd = `docker run -d --name ${project.slug} --restart unless-stopped --memory="512m" --cpus="1.0" ${portEnv} ${envFlags} ${imageTag}`;
+
+        try {
+            await execPromise(runCmd, { timeout: 30000 });
+            await updateLogs(`Container ${project.slug} started`);
+        } catch (err) {
+            throw new Error(`Container start failed: ${err.message}`);
+        }
+
+        // Connect to gateway network
+        await updateLogs("=== CONNECTING TO GATEWAY NETWORK ===");
+        const gatewayNetwork = process.env.GATEWAY_NETWORK || 'vpsbuilds_default';
+
+        try {
+            await execPromise(`docker network connect ${gatewayNetwork} ${project.slug}`, { timeout: 10000 });
+            await updateLogs(`Connected to ${gatewayNetwork}`);
+        } catch (err) {
+            // Check if already connected
+            if (err.message.includes('already exists')) {
+                await updateLogs(`Already connected to ${gatewayNetwork}`);
+            } else {
+                throw new Error(`Network connect failed: ${err.message}`);
+            }
+        }
+
+        // Wait for container to be ready
+        await updateLogs("Waiting for container to be ready...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Health check from nginx
+        await updateLogs("=== HEALTH CHECK ===");
+        const healthResult = await healthCheckFromNginx(project.slug, project.port || 3000);
+
+        if (!healthResult.reachable) {
+            throw new Error(`Health check failed: ${healthResult.error}`);
+        }
+
+        await updateLogs(`[OK] Container reachable (HTTP ${healthResult.statusCode})`);
+
+        // Generate nginx config
+        await updateLogs("=== CONFIGURING GATEWAY ===");
+        const configPath = await writeNginxConfig(project);
+        await updateLogs(`Config created: ${configPath}`);
+
+        // Reload nginx with validation
+        await updateLogs("Reloading nginx...");
+        const reloadResult = await reloadNginx(project);
+
+        if (reloadResult.success) {
+            await updateLogs("[OK] Nginx reloaded");
+        }
+
+        await prisma.deployment.update({
+            where: { id: deploymentId },
+            data: { status: "DEPLOYED", finishedAt: new Date() }
+        });
+
+        await updateLogs("=== DEPLOYMENT COMPLETE ===");
+        const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:8088'}/apps/${project.slug}/`;
+        await updateLogs(`✓ Server live at: ${publicUrl}`);
+        await updateLogs(`✓ Container: ${project.slug}`);
+
+    } catch (err) {
+        await updateLogs(`[ERROR] ${err.message}`);
+        await updateLogs("Deployment failed. Please check logs above for details.");
+        await prisma.deployment.update({
+            where: { id: deploymentId },
+            data: { status: "FAILED", finishedAt: new Date() }
+        });
     }
 }
 

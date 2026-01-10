@@ -28,7 +28,10 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
         packageManager: "npm",
         buildCommand: "",
         outputDir: "dist",
-        spaRouting: true
+        spaRouting: true,
+        // Server-specific settings
+        startCommand: "",
+        port: 3000
     });
 
     // Step 5: Env Vars
@@ -100,7 +103,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 token: getToken(),
                 body: { rootDir: path }
             });
-            
+
             // Set deployType based on selection
             const deployType = siteType === "server" ? "BACKEND" : "FRONTEND";
             await apiFetch(`/projects/${projectId}/deploy-type`, {
@@ -114,12 +117,23 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 token: getToken(),
                 body: { projectId }
             });
-            setBuildSettings({
-                packageManager: res.project.packageManager || "npm",
-                buildCommand: res.project.buildCommand || "",
-                outputDir: res.project.outputDir || "dist",
-                spaRouting: true
-            });
+
+            if (siteType === "server") {
+                // Server settings
+                setBuildSettings({
+                    packageManager: res.project.packageManager || "npm",
+                    startCommand: res.project.startCommand || "npm start",
+                    port: res.project.port || 3000
+                });
+            } else {
+                // Static site settings
+                setBuildSettings({
+                    packageManager: res.project.packageManager || "npm",
+                    buildCommand: res.project.buildCommand || "",
+                    outputDir: res.project.outputDir || "dist",
+                    spaRouting: true
+                });
+            }
             setStep(4);
         } catch (e) { alert(e.message); }
         setLoading(false);
@@ -128,10 +142,22 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     const saveSettings = async () => {
         setLoading(true);
         try {
+            const updateData = siteType === "server"
+                ? {
+                    packageManager: buildSettings.packageManager,
+                    startCommand: buildSettings.startCommand,
+                    port: parseInt(buildSettings.port)
+                }
+                : {
+                    packageManager: buildSettings.packageManager,
+                    buildCommand: buildSettings.buildCommand,
+                    outputDir: buildSettings.outputDir
+                };
+
             await apiFetch(`/projects/${projectId}`, {
                 method: "PATCH",
                 token: getToken(),
-                body: { ...buildSettings }
+                body: updateData
             });
             setStep(5);
         } catch (e) { alert(e.message); }
@@ -310,8 +336,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
             {step === 4 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 4: Build Settings</h3>
-                    <p style={stepDesc}>We auto-detected these settings. Tweaks allowed.</p>
+                    <h3 style={stepTitle}>Step 4: {siteType === "server" ? "Server Settings" : "Build Settings"}</h3>
+                    <p style={stepDesc}>{siteType === "server" ? "Configure your server runtime settings." : "We auto-detected these settings. Tweaks allowed."}</p>
+
                     <div style={{ display: "grid", gap: 20, marginBottom: 25 }}>
                         <div>
                             <label style={labelStyle}>Package Manager</label>
@@ -319,22 +346,68 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                                 <option value="npm">npm</option>
                                 <option value="yarn">yarn</option>
                                 <option value="pnpm">pnpm</option>
-                                <option value="static">None (Static HTML)</option>
+                                {siteType !== "server" && <option value="static">None (Static HTML)</option>}
                             </select>
                         </div>
-                        <div>
-                            <label style={labelStyle}>Build Command</label>
-                            <input value={buildSettings.buildCommand} onChange={e => setBuildSettings({...buildSettings, buildCommand: e.target.value})} placeholder="e.g. npm run build" style={inputStyle} />
-                        </div>
-                        <div>
-                            <label style={labelStyle}>Output Directory</label>
-                            <input value={buildSettings.outputDir} onChange={e => setBuildSettings({...buildSettings, outputDir: e.target.value})} placeholder="e.g. dist" style={inputStyle} />
-                        </div>
-                        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                            <input type="checkbox" checked={buildSettings.spaRouting} onChange={e => setBuildSettings({...buildSettings, spaRouting: e.target.checked})} style={{ width: 18, height: 18 }} />
-                            <span><b>SPA Routing</b> (Redirect 404s to index.html)</span>
-                        </label>
+
+                        {siteType === "server" ? (
+                            <>
+                                <div>
+                                    <label style={labelStyle}>Start Command</label>
+                                    <input
+                                        value={buildSettings.startCommand}
+                                        onChange={e => setBuildSettings({...buildSettings, startCommand: e.target.value})}
+                                        placeholder="e.g. npm start, node server.js"
+                                        style={inputStyle}
+                                    />
+                                </div>
+                                <div>
+                                    <label style={labelStyle}>Port (Internal)</label>
+                                    <input
+                                        type="number"
+                                        value={buildSettings.port}
+                                        onChange={e => setBuildSettings({...buildSettings, port: e.target.value})}
+                                        placeholder="3000"
+                                        style={inputStyle}
+                                    />
+                                    <small style={{ color: "#666", fontSize: "0.85em", display: "block", marginTop: 5 }}>
+                                        Port your app listens on (detected from code)
+                                    </small>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div>
+                                    <label style={labelStyle}>Build Command</label>
+                                    <input
+                                        value={buildSettings.buildCommand}
+                                        onChange={e => setBuildSettings({...buildSettings, buildCommand: e.target.value})}
+                                        placeholder="e.g. npm run build"
+                                        style={inputStyle}
+                                    />
+                                </div>
+                                <div>
+                                    <label style={labelStyle}>Output Directory</label>
+                                    <input
+                                        value={buildSettings.outputDir}
+                                        onChange={e => setBuildSettings({...buildSettings, outputDir: e.target.value})}
+                                        placeholder="e.g. dist"
+                                        style={inputStyle}
+                                    />
+                                </div>
+                                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={buildSettings.spaRouting}
+                                        onChange={e => setBuildSettings({...buildSettings, spaRouting: e.target.checked})}
+                                        style={{ width: 18, height: 18 }}
+                                    />
+                                    <span><b>SPA Routing</b> (Redirect 404s to index.html)</span>
+                                </label>
+                            </>
+                        )}
                     </div>
+
                     <div style={{ display: "flex", gap: 10 }}>
                         <button onClick={() => setStep(3)} style={secondaryBtn}>Back</button>
                         <button onClick={saveSettings} style={primaryBtn}>Next: Env Vars →</button>
@@ -421,20 +494,33 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 }
 
 function SimpleFolderTree({ tree, onSelect, selected, depth = 0 }) {
+    const [isExpanded, setIsExpanded] = useState(depth === 0); // Root starts expanded
+    const hasChildren = tree.children && tree.children.length > 0;
+
     return (
         <div style={{ paddingLeft: depth === 0 ? 0 : 20 }}>
-            <div 
-                onClick={() => onSelect(tree.path)}
-                style={{ 
-                    padding: "6px 8px", cursor: "pointer", 
+            <div
+                style={{
+                    padding: "6px 8px", cursor: "pointer",
                     background: selected === tree.path ? "#e3f2fd" : "transparent",
                     color: selected === tree.path ? "#1565c0" : "inherit",
                     borderRadius: 4, display: "flex", alignItems: "center", gap: 6
                 }}
             >
-                <span>{tree.name === "(root)" ? "📂 Project Root" : "📁 " + tree.name}</span>
+                {hasChildren && (
+                    <span
+                        onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
+                        style={{ userSelect: "none", width: 16, display: "inline-block", fontWeight: "bold" }}
+                    >
+                        {isExpanded ? "▼" : "▶"}
+                    </span>
+                )}
+                {!hasChildren && <span style={{ width: 16, display: "inline-block" }}></span>}
+                <span onClick={() => onSelect(tree.path)}>
+                    {tree.name === "(Project Root)" || tree.name === "(root)" ? "📂 Project Root" : "📁 " + tree.name}
+                </span>
             </div>
-            {tree.children && tree.children.filter(c => c.type === "folder").map(child => (
+            {isExpanded && hasChildren && tree.children.map(child => (
                 <SimpleFolderTree key={child.path} tree={child} onSelect={onSelect} selected={selected} depth={depth + 1} />
             ))}
         </div>

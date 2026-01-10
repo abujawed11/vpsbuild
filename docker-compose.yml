@@ -60,3 +60,4 @@ services:
 volumes:
   postgres_data:
   static_sites:
+  gateway_projects:

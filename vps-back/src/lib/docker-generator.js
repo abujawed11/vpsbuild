@@ -15,6 +15,9 @@ function generateNodeBackendDockerfile(config) {
     copyFiles = "COPY package.json pnpm-lock.yaml ./";
   }
 
+  // Ensure server listens on 0.0.0.0
+  const wrappedStart = `export HOST=0.0.0.0 && ${startCommand}`;
+
   return `FROM node:18-alpine
 
 WORKDIR /app
@@ -29,11 +32,12 @@ COPY . .
 # Environment
 ENV NODE_ENV=production
 ENV PORT=${port}
+ENV HOST=0.0.0.0
 
 EXPOSE ${port}
 
-# Start
-CMD ["sh", "-c", "${startCommand}"]
+# Start (ensure binding to 0.0.0.0)
+CMD sh -c "${wrappedStart}"
 `;
 }
 

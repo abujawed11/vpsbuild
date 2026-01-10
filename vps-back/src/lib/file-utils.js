@@ -30,37 +30,23 @@ async function getDirectoryChildren(workspacePath, relativePath = "") {
       for (const entry of entries) {
           if (IGNORED_DIRS.has(entry.name)) continue;
 
-          // We only care about folders for this picker? 
-          // Request said "File Explorer" feel but we are picking *folders*.
-          // Displaying files might be nice for context (e.g. package.json), but let's stick to folders + signals for now to keep it clean, 
-          // OR include files but disable selection. 
-          // The previous implementation showed signals. Let's stick to folders but check for signals.
-          
           if (entry.isDirectory()) {
               const childRelPath = path.join(safeRelative, entry.name).replace(/\\/g, "/");
-              
+
               // Check for signals in this folder (shallow scan of its children)
               const subPath = path.join(fullPath, entry.name);
               const subEntries = await fs.promises.readdir(subPath).catch(() => []);
               const folderSignals = subEntries.filter(f => SIGNAL_FILES.includes(f));
-              
-              // Check if it has subfolders (to show expand arrow)
-              // This is an extra read, but improved UX.
-              const hasSubfolders = subEntries.some(sub => {
-                  try {
-                      // We need to know if it is a directory. readdir returns names only unless withFileTypes is true, 
-                      // but subEntries above is just names? No, I need withFileTypes for checking children type.
-                      // Let's optimize: just mark it as folder. UI will verify on expand.
-                      return false; // We won't check deep to avoid perf hit.
-                  } catch { return false; }
-              });
+
+              // Recursively get children for nested folders
+              const nestedChildren = await getDirectoryChildren(workspacePath, childRelPath);
 
               children.push({
                   name: entry.name,
                   path: childRelPath,
                   type: "folder",
                   signals: folderSignals,
-                  hasChildren: true // Assume true for folders to show arrow, update later if empty?
+                  children: nestedChildren
               });
           }
       }
