@@ -9,17 +9,24 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
     const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
     const baseUrl = `http://${baseDomain}${basePort}`;
-    
-    // Step 1: Create Site
+
+    // Step 1: Choose Source Type
+    const [sourceType, setSourceType] = useState(""); // "github" or "zip"
+
+    // Step 2: Create Site
     const [siteName, setSiteName] = useState("");
     const [siteSlug, setSiteSlug] = useState("");
     const [siteType, setSiteType] = useState("static"); // static, server
-    
-    // Step 2: Choose Source
+
+    // Step 3a: GitHub Source
     const [repos, setRepos] = useState([]);
     const [selectedRepo, setSelectedRepo] = useState(null);
     const [branches, setBranches] = useState([]);
     const [selectedBranch, setSelectedBranch] = useState("");
+
+    // Step 3b: ZIP Upload Source
+    const [uploadedFile, setUploadedFile] = useState(null);
+    const [uploadProgress, setUploadProgress] = useState(0);
 
     // Step 3: Select Root
     const [projectId, setProjectId] = useState(null);
@@ -93,9 +100,71 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
             await apiFetch("/projects/clone", { method: "POST", token: getToken(), body: { projectId: res.project.id } });
             const treeData = await apiFetch(`/projects/${res.project.id}/tree`, { token: getToken() });
             setFolderTree(treeData.tree);
-            setStep(3);
+            setStep(4);
         } catch (e) { alert(e.message); }
         setLoading(false);
+    };
+
+    const createProjectWithZip = async () => {
+        if (!uploadedFile) return;
+
+        setLoading(true);
+        try {
+            // Create project first
+            const res = await apiFetch("/projects", {
+                method: "POST",
+                token: getToken(),
+                body: {
+                    name: siteName,
+                    slug: siteSlug,
+                    groupId,
+                    repoFullName: "uploaded-zip",
+                    branch: "main"
+                }
+            });
+
+            setProjectId(res.project.id);
+            setProjectData(res.project);
+
+            // Upload ZIP file
+            const formData = new FormData();
+            formData.append("file", uploadedFile);
+
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    setUploadProgress(percent);
+                }
+            };
+
+            xhr.onload = async () => {
+                if (xhr.status === 200) {
+                    setUploadProgress(100);
+                    // Get folder tree
+                    const treeData = await apiFetch(`/projects/${res.project.id}/tree`, { token: getToken() });
+                    setFolderTree(treeData.tree);
+                    setStep(4);
+                    setLoading(false);
+                } else {
+                    throw new Error("Upload failed");
+                }
+            };
+
+            xhr.onerror = () => {
+                alert("Upload failed");
+                setLoading(false);
+            };
+
+            xhr.open("POST", `/api/projects/${res.project.id}/upload-zip`);
+            xhr.setRequestHeader("Authorization", `Bearer ${getToken()}`);
+            xhr.send(formData);
+
+        } catch (e) {
+            alert(e.message);
+            setLoading(false);
+        }
     };
 
     const detectSettings = async (path) => {
@@ -138,7 +207,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     spaRouting: true
                 });
             }
-            setStep(4);
+            setStep(5);
         } catch (e) { alert(e.message); }
         setLoading(false);
     };
@@ -163,7 +232,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 token: getToken(),
                 body: updateData
             });
-            setStep(5);
+            setStep(6);
         } catch (e) { alert(e.message); }
         setLoading(false);
     };
@@ -176,7 +245,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 token: getToken()
             });
             setDeployment({ id: res.deploymentId, status: "QUEUED" });
-            setStep(6);
+            setStep(7);
             pollLogs(res.deploymentId);
         } catch (e) { alert(e.message); }
         setLoading(false);
@@ -215,9 +284,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     return (
         <div style={{ background: "white", padding: 30, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.08)" }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 30 }}>
-                {[1, 2, 3, 4, 5, 6].map(s => (
-                    <div key={s} style={{ 
-                        height: 6, flex: 1, 
+                {[1, 2, 3, 4, 5, 6, 7].map(s => (
+                    <div key={s} style={{
+                        height: 6, flex: 1,
                         background: step >= s ? "#2196F3" : "#e0e0e0",
                         borderRadius: 3,
                         transition: "background 0.3s ease"
@@ -227,13 +296,50 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
             {step === 1 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 1: Name Your Site</h3>
+                    <h3 style={stepTitle}>Step 1: Choose Source</h3>
+                    <p style={stepDesc}>How do you want to deploy your site?</p>
+
+                    <div style={{ display: "flex", gap: 15, marginBottom: 25 }}>
+                        <button
+                            onClick={() => { setSourceType("github"); setStep(2); }}
+                            style={{
+                                flex: 1, padding: 25, borderRadius: 12, border: "2px solid #ddd",
+                                background: "white", cursor: "pointer", textAlign: "center", transition: "all 0.2s"
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.borderColor = "#2196F3"}
+                            onMouseLeave={e => e.currentTarget.style.borderColor = "#ddd"}
+                        >
+                            <div style={{ fontSize: "2em", marginBottom: 10 }}>🔗</div>
+                            <strong style={{ display: "block", marginBottom: 5 }}>Deploy from GitHub</strong>
+                            <div style={{ fontSize: "0.85em", color: "#666" }}>Connect your repository and auto-deploy</div>
+                        </button>
+
+                        <button
+                            onClick={() => { setSourceType("zip"); setStep(2); }}
+                            style={{
+                                flex: 1, padding: 25, borderRadius: 12, border: "2px solid #ddd",
+                                background: "white", cursor: "pointer", textAlign: "center", transition: "all 0.2s"
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.borderColor = "#2196F3"}
+                            onMouseLeave={e => e.currentTarget.style.borderColor = "#ddd"}
+                        >
+                            <div style={{ fontSize: "2em", marginBottom: 10 }}>📦</div>
+                            <strong style={{ display: "block", marginBottom: 5 }}>Upload ZIP File</strong>
+                            <div style={{ fontSize: "0.85em", color: "#666" }}>Upload your project directly (max 100MB)</div>
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {step === 2 && (
+                <div className="fade-in">
+                    <h3 style={stepTitle}>Step 2: Name Your Site</h3>
                     <p style={stepDesc}>Give your project a name. We'll generate a unique URL for it.</p>
-                    
+
                     <div style={{ marginBottom: 20 }}>
                         <label style={labelStyle}>Project Type</label>
                         <div style={{ display: "flex", gap: 10 }}>
-                             <button 
+                             <button
                                 onClick={() => setSiteType("static")}
                                 style={{
                                     flex: 1, padding: 15, borderRadius: 8, border: siteType === "static" ? "2px solid #2196F3" : "1px solid #ddd",
@@ -243,7 +349,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                                 <strong>Static Website</strong>
                                 <div style={{ fontSize: "0.8em", color: "#666" }}>React, Vue, Static HTML</div>
                              </button>
-                             <button 
+                             <button
                                 onClick={() => setSiteType("server")}
                                 style={{
                                     flex: 1, padding: 15, borderRadius: 8, border: siteType === "server" ? "2px solid #2196F3" : "1px solid #ddd",
@@ -258,50 +364,48 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
                     <div style={{ marginBottom: 20 }}>
                         <label style={labelStyle}>Site Name</label>
-                        <input 
-                            value={siteName} 
-                            onChange={e => setSiteName(e.target.value)} 
-                            placeholder="My Awesome Site" 
-                            style={inputStyle} 
+                        <input
+                            value={siteName}
+                            onChange={e => setSiteName(e.target.value)}
+                            placeholder="My Awesome Site"
+                            style={inputStyle}
                             autoFocus
                         />
                     </div>
                     <div style={{ marginBottom: 25 }}>
                         <label style={labelStyle}>Site URL</label>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f5f5f5", padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd" }}>
-                            {siteType === "server" ? (
-                                <>
-                                    <span style={{ color: "#888" }}>{baseUrl}/apps/</span>
-                                    <input
-                                        value={siteSlug}
-                                        onChange={e => setSiteSlug(e.target.value)}
-                                        style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }}
-                                    />
-                                    <span style={{ color: "#888" }}>/</span>
-                                </>
-                            ) : (
-                                <>
-                                    <span style={{ color: "#888" }}>http://</span>
-                                    <input
-                                        value={siteSlug}
-                                        onChange={e => setSiteSlug(e.target.value)}
-                                        style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }}
-                                    />
-                                    <span style={{ color: "#888" }}>.{baseDomain}{basePort}</span>
-                                </>
-                            )}
+                            <span style={{ color: "#888" }}>http://</span>
+                            <input
+                                value={siteSlug}
+                                onChange={e => setSiteSlug(e.target.value)}
+                                style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }}
+                            />
+                            <span style={{ color: "#888" }}>.{baseDomain}{basePort}</span>
                         </div>
                     </div>
-                    <button onClick={() => { fetchRepos(); setStep(2); }} disabled={!siteSlug} style={primaryBtn}>
-                        Next: Choose Source →
-                    </button>
+                    <div style={{ display: "flex", gap: 10 }}>
+                        <button onClick={() => setStep(1)} style={secondaryBtn}>← Back</button>
+                        <button
+                            onClick={() => {
+                                if (sourceType === "github") {
+                                    fetchRepos();
+                                }
+                                setStep(3);
+                            }}
+                            disabled={!siteSlug}
+                            style={primaryBtn}
+                        >
+                            Next: {sourceType === "github" ? "Choose Repository" : "Upload Files"} →
+                        </button>
+                    </div>
                 </div>
             )}
 
-            {step === 2 && (
+            {step === 3 && sourceType === "github" && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 2: Choose Source</h3>
-                    <p style={stepDesc}>Connect a GitHub repository to deploy.</p>
+                    <h3 style={stepTitle}>Step 3: Choose Repository</h3>
+                    <p style={stepDesc}>Select a GitHub repository to deploy.</p>
                     {loading ? <p>Loading repos...</p> : (
                         <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 20 }}>
                             {repos.map(r => (
@@ -325,7 +429,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                         </div>
                     )}
                     <div style={{ display: "flex", gap: 10 }}>
-                        <button onClick={() => setStep(1)} style={secondaryBtn}>Back</button>
+                        <button onClick={() => setStep(2)} style={secondaryBtn}>← Back</button>
                         <button onClick={createProject} disabled={!selectedBranch || loading} style={primaryBtn}>
                             {loading ? "Initializing..." : "Next: Select Root →"}
                         </button>
@@ -333,9 +437,93 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 </div>
             )}
 
-            {step === 3 && (
+            {step === 3 && sourceType === "zip" && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 3: Select Root Folder</h3>
+                    <h3 style={stepTitle}>Step 3: Upload ZIP File</h3>
+                    <p style={stepDesc}>Upload your project as a ZIP file (max 100MB)</p>
+
+                    <div
+                        style={{
+                            border: "2px dashed #2196F3",
+                            borderRadius: 12,
+                            padding: 40,
+                            textAlign: "center",
+                            background: "#f5f9ff",
+                            marginBottom: 20,
+                            cursor: "pointer"
+                        }}
+                        onClick={() => document.getElementById("zipInput").click()}
+                        onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.background = "#e3f2fd"; }}
+                        onDragLeave={(e) => { e.currentTarget.style.background = "#f5f9ff"; }}
+                        onDrop={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.style.background = "#f5f9ff";
+                            const file = e.dataTransfer.files[0];
+                            if (file && file.name.endsWith(".zip")) {
+                                setUploadedFile(file);
+                            } else {
+                                alert("Please upload a ZIP file");
+                            }
+                        }}
+                    >
+                        <input
+                            id="zipInput"
+                            type="file"
+                            accept=".zip"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                                const file = e.target.files[0];
+                                if (file) setUploadedFile(file);
+                            }}
+                        />
+                        {uploadedFile ? (
+                            <div>
+                                <div style={{ fontSize: "2em", marginBottom: 10 }}>✅</div>
+                                <strong>{uploadedFile.name}</strong>
+                                <div style={{ color: "#666", fontSize: "0.9em", marginTop: 5 }}>
+                                    {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
+                                </div>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setUploadedFile(null); }}
+                                    style={{ marginTop: 10, padding: "5px 15px", cursor: "pointer" }}
+                                >
+                                    Remove
+                                </button>
+                            </div>
+                        ) : (
+                            <div>
+                                <div style={{ fontSize: "3em", marginBottom: 10 }}>📦</div>
+                                <strong>Click to browse or drag & drop</strong>
+                                <div style={{ color: "#666", fontSize: "0.9em", marginTop: 5 }}>
+                                    ZIP files only • Max 100MB
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {uploadProgress > 0 && uploadProgress < 100 && (
+                        <div style={{ marginBottom: 20 }}>
+                            <div style={{ background: "#e0e0e0", borderRadius: 8, height: 8, overflow: "hidden" }}>
+                                <div style={{ background: "#2196F3", height: "100%", width: `${uploadProgress}%`, transition: "width 0.3s" }} />
+                            </div>
+                            <div style={{ textAlign: "center", marginTop: 5, fontSize: "0.9em", color: "#666" }}>
+                                Uploading... {uploadProgress}%
+                            </div>
+                        </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 10 }}>
+                        <button onClick={() => setStep(2)} style={secondaryBtn}>← Back</button>
+                        <button onClick={createProjectWithZip} disabled={!uploadedFile || loading} style={primaryBtn}>
+                            {loading ? "Uploading..." : "Next: Select Root →"}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {step === 4 && (
+                <div className="fade-in">
+                    <h3 style={stepTitle}>Step 4: Select Root Folder</h3>
                     <p style={stepDesc}>Where does your frontend code live? (Usually root or a subfolder like /frontend)</p>
                     <div style={{ border: "1px solid #eee", padding: 10, borderRadius: 8, maxHeight: 300, overflowY: "auto", marginBottom: 20, background: "#fafafa" }}>
                         {folderTree && <SimpleFolderTree tree={folderTree} onSelect={setSelectedRoot} selected={selectedRoot} />}
@@ -344,7 +532,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                         <span style={{ fontSize: "0.9em", color: "#1565c0" }}>Selected: <b>{selectedRoot}</b></span>
                     </div>
                     <div style={{ display: "flex", gap: 10 }}>
-                        <button onClick={() => setStep(2)} style={secondaryBtn}>Back</button>
+                        <button onClick={() => setStep(3)} style={secondaryBtn}>← Back</button>
                         <button onClick={() => detectSettings(selectedRoot)} disabled={loading} style={primaryBtn}>
                             {loading ? "Detecting..." : "Next: Build Settings →"}
                         </button>
@@ -352,9 +540,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 </div>
             )}
 
-            {step === 4 && (
+            {step === 5 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 4: {siteType === "server" ? "Server Settings" : "Build Settings"}</h3>
+                    <h3 style={stepTitle}>Step 5: {siteType === "server" ? "Server Settings" : "Build Settings"}</h3>
                     <p style={stepDesc}>{siteType === "server" ? "Configure your server runtime settings." : "We auto-detected these settings. Tweaks allowed."}</p>
 
                     <div style={{ display: "grid", gap: 20, marginBottom: 25 }}>
@@ -427,15 +615,15 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     </div>
 
                     <div style={{ display: "flex", gap: 10 }}>
-                        <button onClick={() => setStep(3)} style={secondaryBtn}>Back</button>
+                        <button onClick={() => setStep(4)} style={secondaryBtn}>← Back</button>
                         <button onClick={saveSettings} style={primaryBtn}>Next: Env Vars →</button>
                     </div>
                 </div>
             )}
 
-            {step === 5 && (
+            {step === 6 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 5: Environment Variables</h3>
+                    <h3 style={stepTitle}>Step 6: Environment Variables</h3>
                     <p style={stepDesc}>Add keys like VITE_API_URL. (Build-time only)</p>
                     <div style={{ marginBottom: 25 }}>
                         {envVars.length > 0 && (
@@ -456,13 +644,13 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                         </div>
                     </div>
                     <div style={{ display: "flex", gap: 10 }}>
-                        <button onClick={() => setStep(4)} style={secondaryBtn}>Back</button>
+                        <button onClick={() => setStep(5)} style={secondaryBtn}>← Back</button>
                         <button onClick={startDeploy} style={{ ...primaryBtn, background: "#00C853" }}>Deploy Now 🚀</button>
                     </div>
                 </div>
             )}
 
-            {step === 6 && (
+            {step === 7 && (
                 <div className="fade-in">
                     <h3 style={stepTitle}>Building & Deploying...</h3>
                     <div id="log-container" style={{ 

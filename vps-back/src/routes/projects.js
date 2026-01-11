@@ -8,6 +8,8 @@ const fsSync = require("fs");
 const { exec } = require("child_process");
 const util = require("util");
 const execPromise = util.promisify(exec);
+const multer = require("multer");
+const extract = require("extract-zip");
 const { detectFramework } = require("../lib/detector");
 const { cloneRepo } = require("../lib/git");
 const { analyzeWorkspace } = require("../lib/analyzer");
@@ -556,6 +558,83 @@ router.post("/clone", authRequired, async (req, res) => {
     });
 
     res.status(500).json({ error: "Failed to clone repository" });
+  }
+});
+
+// Configure multer for ZIP uploads
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
+  fileFilter: (req, file, cb) => {
+    if (path.extname(file.originalname).toLowerCase() === ".zip") {
+      cb(null, true);
+    } else {
+      cb(new Error("Only ZIP files are allowed"));
+    }
+  }
+});
+
+// POST /api/projects/:id/upload-zip
+router.post("/:id/upload-zip", authRequired, upload.single("file"), async (req, res) => {
+  const { id: projectId } = req.params;
+
+  try {
+    // Verify project ownership
+    const project = await prisma.project.findUnique({
+      where: { id: projectId }
+    });
+
+    if (!project || project.userId !== req.user.id) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    console.log(`[Upload] Processing ZIP for project: ${project.name}`);
+
+    // Define workspace path
+    const workspaceRoot = process.env.WORKSPACE_ROOT || path.join(__dirname, "../../workspaces");
+    const targetDir = path.join(workspaceRoot, req.user.id, project.name);
+
+    // Create target directory
+    await fs.mkdir(targetDir, { recursive: true });
+
+    // Extract ZIP file
+    console.log(`[Upload] Extracting ZIP to: ${targetDir}`);
+    await extract(req.file.path, { dir: path.resolve(targetDir) });
+
+    // Remove uploaded ZIP file
+    await fs.unlink(req.file.path);
+
+    // Update project status
+    const updated = await prisma.project.update({
+      where: { id: projectId },
+      data: {
+        workspacePath: targetDir,
+        cloneStatus: "CLONED"
+      }
+    });
+
+    console.log(`[Upload] ZIP extracted successfully`);
+    res.json({ success: true, project: updated });
+
+  } catch (err) {
+    console.error("[Upload] Error:", err.message);
+
+    // Cleanup uploaded file
+    if (req.file && fsSync.existsSync(req.file.path)) {
+      await fs.unlink(req.file.path).catch(() => {});
+    }
+
+    // Update project status
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { cloneStatus: "FAILED" }
+    });
+
+    res.status(500).json({ error: "Failed to upload and extract ZIP" });
   }
 });
 
