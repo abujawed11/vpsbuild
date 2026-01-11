@@ -5,6 +5,9 @@ const { authRequired } = require("../middleware/auth");
 const path = require("path");
 const fs = require("fs").promises;
 const fsSync = require("fs");
+const { exec } = require("child_process");
+const util = require("util");
+const execPromise = util.promisify(exec);
 const { detectFramework } = require("../lib/detector");
 const { cloneRepo } = require("../lib/git");
 const { analyzeWorkspace } = require("../lib/analyzer");
@@ -353,7 +356,43 @@ router.delete("/:id", authRequired, async (req, res) => {
             console.log(`[Delete] Workspace not found or not set`);
         }
 
-        // 4. Delete from database (cascades to deployments and envVars)
+        // 4. Stop and remove Docker container (for server deployments)
+        if (project.slug && project.deployType === "BACKEND") {
+            try {
+                console.log(`[Delete] Stopping Docker container: ${project.slug}`);
+                await execPromise(`docker stop ${project.slug}`).catch(() => {
+                    console.log(`[Delete] Container ${project.slug} not running or doesn't exist`);
+                });
+
+                console.log(`[Delete] Removing Docker container: ${project.slug}`);
+                await execPromise(`docker rm ${project.slug}`).catch(() => {
+                    console.log(`[Delete] Container ${project.slug} already removed`);
+                });
+
+                console.log(`[Delete] Removing Docker image: ${project.slug}:latest`);
+                await execPromise(`docker rmi ${project.slug}:latest`).catch(() => {
+                    console.log(`[Delete] Image ${project.slug}:latest not found or already removed`);
+                });
+
+                console.log(`[Delete] Docker resources cleaned successfully`);
+            } catch (err) {
+                console.error(`[Delete] Docker cleanup error (non-fatal): ${err.message}`);
+            }
+        }
+
+        // 5. Remove nginx configuration
+        if (project.slug) {
+            try {
+                const { removeNginxConfig } = require("../lib/nginx-config-generator");
+                console.log(`[Delete] Removing nginx config for: ${project.slug}`);
+                await removeNginxConfig(project.slug);
+                console.log(`[Delete] Nginx config removed successfully`);
+            } catch (err) {
+                console.error(`[Delete] Nginx config cleanup error (non-fatal): ${err.message}`);
+            }
+        }
+
+        // 6. Delete from database (cascades to deployments and envVars)
         console.log(`[Delete] Removing project from database`);
         await prisma.project.delete({ where: { id } });
         console.log(`[Delete] Project deleted successfully from database`);

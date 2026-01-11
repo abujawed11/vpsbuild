@@ -11,6 +11,7 @@ export default function GroupView() {
     const [projects, setProjects] = useState([]);
     const [showWizard, setShowWizard] = useState(false);
     const [err, setErr] = useState("");
+    const [deletingProjectId, setDeletingProjectId] = useState(null);
 
     const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
     const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
@@ -46,16 +47,14 @@ export default function GroupView() {
     // Deletion of Project
     const deleteProject = async (projectId, projectName) => {
         const confirmed = window.confirm(
-            `Are you sure you want to delete "${projectName}"?\n\n` +
-            `This will permanently delete:\n` +
-            `• All deployments and logs\n` +
-            `• All environment variables\n` +
-            `• All deployed files and releases\n` +
-            `• The cloned repository workspace\n\n` +
-            `This action cannot be undone!`
+            `Delete "${projectName}"?\n\n` +
+            `This will permanently remove your site and all its data.\n` +
+            `This action cannot be undone.`
         );
 
         if (!confirmed) return;
+
+        setDeletingProjectId(projectId);
 
         try {
             await apiFetch(`/projects/${projectId}`, {
@@ -65,6 +64,8 @@ export default function GroupView() {
             fetchGroup();
         } catch (e) {
             alert(`Failed to delete project: ${e.message}`);
+        } finally {
+            setDeletingProjectId(null);
         }
     };
 
@@ -151,14 +152,19 @@ export default function GroupView() {
                                             {latestStatus}
                                         </span>
                                         <div style={{ display: "flex", gap: 8 }}>
-                                            <button 
+                                            <button
                                                 onClick={() => deleteProject(p.id, p.name)}
+                                                disabled={deletingProjectId === p.id}
                                                 style={{
                                                     fontSize: "0.8em", padding: "4px 8px",
-                                                    background: "#ffebee", color: "#c62828", border: "1px solid #ef9a9a", cursor: "pointer"
+                                                    background: deletingProjectId === p.id ? "#e0e0e0" : "#ffebee",
+                                                    color: deletingProjectId === p.id ? "#999" : "#c62828",
+                                                    border: `1px solid ${deletingProjectId === p.id ? "#bdbdbd" : "#ef9a9a"}`,
+                                                    cursor: deletingProjectId === p.id ? "not-allowed" : "pointer",
+                                                    opacity: deletingProjectId === p.id ? 0.7 : 1
                                                 }}
                                             >
-                                                Delete
+                                                {deletingProjectId === p.id ? "Deleting..." : "Delete"}
                                             </button>
                                         </div>
                                     </div>

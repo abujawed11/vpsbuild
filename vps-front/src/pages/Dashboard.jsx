@@ -73,11 +73,14 @@ export default function Dashboard() {
     };
     
     const deleteGroup = async (groupId, groupName) => {
-        if (!window.confirm(`Delete project group "${groupName}"?\nThis will delete all contained sites and deployments.`)) return;
+        if (!window.confirm(`Delete project "${groupName}"?`)) return;
         try {
             await apiFetch(`/groups/${groupId}`, { method: "DELETE", token: getToken() });
             fetchData();
-        } catch (e) { alert(e.message); }
+        } catch (e) {
+            // Show user-friendly error message
+            alert(e.message || "Failed to delete project");
+        }
     };
 
     function logout() {

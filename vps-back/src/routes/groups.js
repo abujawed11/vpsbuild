@@ -69,12 +69,23 @@ router.delete("/:id", authRequired, async (req, res) => {
     const { id } = req.params;
     try {
         // Verify ownership
-        const group = await prisma.projectGroup.findUnique({ where: { id } });
+        const group = await prisma.projectGroup.findUnique({
+            where: { id },
+            include: { projects: true }
+        });
         if (!group || group.userId !== req.user.id) {
             return res.status(404).json({ error: "Group not found" });
         }
 
-        // Cleanup files for all projects in group
+        // AWS-style: Prevent deletion if project contains sites
+        if (group.projects && group.projects.length > 0) {
+            return res.status(400).json({
+                error: "Cannot delete project with sites",
+                message: `This project contains ${group.projects.length} site${group.projects.length > 1 ? 's' : ''}. Please delete all sites first.`
+            });
+        }
+
+        // Project is empty, safe to delete
         const projects = await prisma.project.findMany({ where: { groupId: id } });
         
         for (const p of projects) {
