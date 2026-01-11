@@ -269,7 +269,12 @@ async function runServerDeploy(project, deploymentId) {
         });
 
         await updateLogs("=== DEPLOYMENT COMPLETE ===");
-        const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:8088'}/apps/${project.slug}/`;
+
+        // Construct subdomain URL
+        const baseDomain = process.env.BASE_DOMAIN || 'localhost';
+        const port = process.env.PUBLIC_BASE_URL?.includes(':8088') ? ':8088' : '';
+        const publicUrl = `http://${project.slug}.${baseDomain}${port}`;
+
         await updateLogs(`✓ Server live at: ${publicUrl}`);
         await updateLogs(`✓ Container: ${project.slug}`);
 

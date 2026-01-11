@@ -5,26 +5,29 @@ const util = require('util');
 const execPromise = util.promisify(exec);
 
 /**
- * Generate nginx config for path-based routing: /apps/<slug>/
+ * Generate nginx config for subdomain-based routing: slug.domain.com
  */
 function generateNginxServerConfig(project) {
     const { slug, port = 3000 } = project;
+    const baseDomain = process.env.BASE_DOMAIN || '93.127.199.118.sslip.io';
 
-    return `# Path-based routing for ${slug}
-location /apps/${slug}/ {
-    proxy_pass http://${slug}:${port}/;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection 'upgrade';
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-Prefix /apps/${slug};
-    proxy_cache_bypass $http_upgrade;
+    return `# Subdomain routing for ${slug}
+server {
+    listen 80;
+    server_name ${slug}.${baseDomain};
 
-    # Rewrite for clean paths
-    proxy_redirect off;
+    location / {
+        proxy_pass http://${slug}:${port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_redirect off;
+    }
 }
 `;
 }
