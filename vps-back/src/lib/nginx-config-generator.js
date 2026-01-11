@@ -52,7 +52,7 @@ async function writeNginxConfig(project) {
  * Test and reload nginx with rollback on failure
  */
 async function reloadNginx(project) {
-    const nginxContainer = 'vpsbuilds-nginx-1';
+    const nginxContainer = process.env.NGINX_CONTAINER || 'vpsbuilds-nginx-1';
 
     try {
         // Test config
@@ -75,7 +75,7 @@ async function reloadNginx(project) {
  * Health check from nginx container
  */
 async function healthCheckFromNginx(containerName, port = 3000) {
-    const nginxContainer = 'vpsbuilds-nginx-1';
+    const nginxContainer = process.env.NGINX_CONTAINER || 'vpsbuilds-nginx-1';
 
     try {
         const cmd = `docker exec ${nginxContainer} sh -c "command -v curl >/dev/null || apk add --no-cache curl >/dev/null 2>&1; curl -f -s -o /dev/null -w '%{http_code}' http://${containerName}:${port}/ || echo fail"`;

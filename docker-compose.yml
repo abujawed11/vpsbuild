@@ -26,6 +26,7 @@ services:
       PUBLIC_BASE_URL: http://93.127.199.118.sslip.io:8088
       BASE_DOMAIN: 93.127.199.118.sslip.io
       GATEWAY_NETWORK: vpsbuilds_default
+      NGINX_CONTAINER: vpsbuild-nginx-1
       DOCKER_ENV: "true"
     volumes:
       - ./vps-back:/app
