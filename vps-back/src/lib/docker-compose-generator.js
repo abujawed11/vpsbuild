@@ -18,8 +18,20 @@ function generateDockerCompose(project, envVars = []) {
         runtime
     } = project;
 
+    const normalizeWorkspaceRelPath = (rel) => {
+        if (rel === undefined || rel === null) return "";
+        const raw = String(rel).trim();
+        if (!raw || raw === "/" || raw === "." || raw === "./") return "";
+        const stripped = raw.replace(/^[/\\]+/, "");
+        const normalized = path.normalize(stripped);
+        if (!normalized || normalized === "." || normalized === path.sep) return "";
+        if (path.isAbsolute(normalized) || normalized.startsWith("..")) return "";
+        return normalized;
+    };
+
     // Build the context path (where Dockerfile is located)
-    const buildContext = rootDir ? path.join(workspacePath, rootDir) : workspacePath;
+    const safeRootDir = normalizeWorkspaceRelPath(rootDir);
+    const buildContext = safeRootDir ? path.join(workspacePath, safeRootDir) : workspacePath;
 
     // Convert env vars array to object
     const environment = {};

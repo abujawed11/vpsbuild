@@ -506,13 +506,22 @@ router.post("/analyze", authRequired, async (req, res) => {
     }
 
     // Determine which folder to analyze
-    // If backendRoot is set, prioritize it (server usually drives the app)
-    // If frontendRoot is set and no backendRoot, use that (static/SPA deploy)
-    let targetRelativePath = "";
-    if (project.backendRoot) {
-        targetRelativePath = project.backendRoot;
-    } else if (project.frontendRoot) {
-        targetRelativePath = project.frontendRoot;
+    const normalizeWorkspaceRelPath = (rel) => {
+        if (rel === undefined || rel === null) return "";
+        const raw = String(rel).trim();
+        if (!raw || raw === "/" || raw === "." || raw === "./") return "";
+        const stripped = raw.replace(/^[/\\]+/, "");
+        const normalized = path.normalize(stripped);
+        if (!normalized || normalized === "." || normalized === path.sep) return "";
+        if (path.isAbsolute(normalized) || normalized.startsWith("..")) return "";
+        return normalized;
+    };
+
+    // Prefer the user-selected rootDir (wizard flow), otherwise fall back to backendRoot/frontendRoot (fullstack flow)
+    let targetRelativePath = normalizeWorkspaceRelPath(project.rootDir);
+    if (!targetRelativePath) {
+        if (project.backendRoot) targetRelativePath = normalizeWorkspaceRelPath(project.backendRoot);
+        else if (project.frontendRoot) targetRelativePath = normalizeWorkspaceRelPath(project.frontendRoot);
     }
 
     // Perform Analysis

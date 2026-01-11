@@ -16,8 +16,12 @@ server {
     listen 80;
     server_name ${slug}.${baseDomain};
 
+    # Docker DNS resolver (delays upstream resolution until request time)
+    resolver 127.0.0.11 ipv6=off valid=10s;
+    set $upstream "${slug}";
+
     location / {
-        proxy_pass http://${slug}:${port};
+        proxy_pass http://$upstream:${port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;

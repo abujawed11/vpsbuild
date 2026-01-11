@@ -15,6 +15,17 @@ const router = express.Router();
 // Mock/Local path for testing if not on server
 const BASE_STATIC_PATH = process.env.STATIC_SITES_PATH || "/srv/static-sites";
 
+function normalizeWorkspaceRelPath(rel) {
+    if (rel === undefined || rel === null) return "";
+    const raw = String(rel).trim();
+    if (!raw || raw === "/" || raw === "." || raw === "./") return "";
+    const stripped = raw.replace(/^[/\\]+/, "");
+    const normalized = path.normalize(stripped);
+    if (!normalized || normalized === "." || normalized === path.sep) return "";
+    if (path.isAbsolute(normalized) || normalized.startsWith("..")) return "";
+    return normalized;
+}
+
 router.post("/:projectId", authRequired, async (req, res) => {
     const { projectId } = req.params;
     
@@ -157,7 +168,7 @@ async function runServerDeploy(project, deploymentId) {
         await updateLogs(`[INFO] Branch: ${project.branch}`);
         await updateLogs(`[INFO] Slug: ${project.slug}`);
 
-        const projectRoot = path.join(project.workspacePath, project.rootDir || "");
+        const projectRoot = path.join(project.workspacePath, normalizeWorkspaceRelPath(project.rootDir));
         await updateLogs(`[INFO] Workspace: ${projectRoot}`);
 
         // Check if Dockerfile exists, if not, generate one
@@ -309,7 +320,7 @@ async function runBuild(project, deploymentId) {
         await updateLogs(`[INFO] Branch: ${project.branch}`);
         await updateLogs(`[INFO] Slug: ${project.slug}`);
 
-        const projectRoot = path.join(project.workspacePath, project.rootDir || "");
+        const projectRoot = path.join(project.workspacePath, normalizeWorkspaceRelPath(project.rootDir));
         await updateLogs(`[INFO] Workspace: ${projectRoot}`);
 
         // Build Pipeline
@@ -331,10 +342,40 @@ async function runBuild(project, deploymentId) {
         }
 
         // Validate Output
-        const outputFullPath = path.join(projectRoot, project.outputDir || ".");
+        const requestedOutputDir = project.outputDir || ".";
+        let outputFullPath = path.join(projectRoot, requestedOutputDir);
+
         if (!fs.existsSync(outputFullPath)) {
-            throw new Error(`Output directory not found: ${project.outputDir}`);
+            const rootIndexHtml = path.join(projectRoot, "index.html");
+            const noBuildConfigured = !project.buildCommand;
+
+            if (noBuildConfigured && fs.existsSync(rootIndexHtml)) {
+                await updateLogs(`[WARN] Output directory not found (${requestedOutputDir}); using project root (index.html detected).`);
+                outputFullPath = projectRoot;
+            } else if (noBuildConfigured) {
+                // Common ZIP case: content is inside a single top-level folder.
+                const entries = fs.readdirSync(projectRoot, { withFileTypes: true });
+                const candidateDirs = entries
+                    .filter((e) => e.isDirectory())
+                    .map((e) => e.name)
+                    .filter((name) => !name.startsWith(".") && name !== "__MACOSX");
+
+                const dirsWithIndex = candidateDirs.filter((dirName) =>
+                    fs.existsSync(path.join(projectRoot, dirName, "index.html"))
+                );
+
+                if (dirsWithIndex.length === 1) {
+                    const chosen = path.join(projectRoot, dirsWithIndex[0]);
+                    await updateLogs(`[WARN] Output directory not found (${requestedOutputDir}); using nested folder (index.html detected): ${dirsWithIndex[0]}`);
+                    outputFullPath = chosen;
+                } else {
+                    throw new Error(`Output directory not found: ${project.outputDir}`);
+                }
+            } else {
+                throw new Error(`Output directory not found: ${project.outputDir}`);
+            }
         }
+
         await updateLogs(`[INFO] Output directory: ${outputFullPath}`);
 
         // ============================================
