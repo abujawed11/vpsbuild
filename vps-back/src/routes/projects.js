@@ -50,6 +50,46 @@ router.get("/", authRequired, async (req, res) => {
     }
 });
 
+// POST /api/projects
+// Creates a project record (used by ZIP-upload flow before uploading the file)
+router.post("/", authRequired, async (req, res) => {
+    const { name, slug: customSlug, groupId, repoFullName, branch } = req.body;
+
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    if (!repoFullName) return res.status(400).json({ error: "repoFullName is required" });
+
+    const slug =
+        customSlug || name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 50);
+
+    try {
+        if (groupId) {
+            const group = await prisma.projectGroup.findUnique({ where: { id: groupId } });
+            if (!group || group.userId !== req.user.id) {
+                return res.status(400).json({ error: "Invalid groupId" });
+            }
+        }
+
+        const project = await prisma.project.create({
+            data: {
+                userId: req.user.id,
+                name,
+                slug,
+                groupId: groupId || null,
+                repoFullName,
+                branch: branch || "main"
+            }
+        });
+
+        res.json({ success: true, project });
+    } catch (err) {
+        if (err?.code === "P2002") {
+            return res.status(400).json({ error: "Project name or slug already exists" });
+        }
+        console.error("Project create failed:", err.message);
+        res.status(500).json({ error: "Failed to create project" });
+    }
+});
+
 // GET /api/projects/:id/deploy-config
 router.get("/:id/deploy-config", authRequired, async (req, res) => {
     const { id } = req.params;
@@ -562,8 +602,22 @@ router.post("/clone", authRequired, async (req, res) => {
 });
 
 // Configure multer for ZIP uploads
+const uploadsDir = process.env.UPLOADS_DIR || path.join(process.cwd(), "uploads");
 const upload = multer({
-  dest: "uploads/",
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      try {
+        fsSync.mkdirSync(uploadsDir, { recursive: true });
+        cb(null, uploadsDir);
+      } catch (err) {
+        cb(err);
+      }
+    },
+    filename: (req, file, cb) => {
+      const safeExt = path.extname(file.originalname).toLowerCase();
+      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${safeExt}`);
+    }
+  }),
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
   fileFilter: (req, file, cb) => {
     if (path.extname(file.originalname).toLowerCase() === ".zip") {
