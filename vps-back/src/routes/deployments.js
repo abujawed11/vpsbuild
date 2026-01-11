@@ -320,11 +320,63 @@ async function runBuild(project, deploymentId) {
         await updateLogs(`[INFO] Branch: ${project.branch}`);
         await updateLogs(`[INFO] Slug: ${project.slug}`);
 
-        const projectRoot = path.join(project.workspacePath, normalizeWorkspaceRelPath(project.rootDir));
-        await updateLogs(`[INFO] Workspace: ${projectRoot}`);
+        const workspaceRoot = path.join(project.workspacePath, normalizeWorkspaceRelPath(project.rootDir));
+        await updateLogs(`[INFO] Workspace: ${workspaceRoot}`);
+
+        const detectSingleNestedAppRoot = (rootDir) => {
+            const pkgPath = path.join(rootDir, "package.json");
+            if (fs.existsSync(pkgPath)) return rootDir;
+
+            const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+            const candidateDirs = entries
+                .filter((e) => e.isDirectory())
+                .map((e) => e.name)
+                .filter((name) => !name.startsWith(".") && name !== "__MACOSX" && name !== "node_modules");
+
+            const dirsWithPackage = candidateDirs.filter((dirName) =>
+                fs.existsSync(path.join(rootDir, dirName, "package.json"))
+            );
+
+            if (dirsWithPackage.length === 1) {
+                return path.join(rootDir, dirsWithPackage[0]);
+            }
+
+            return rootDir;
+        };
+
+        const projectRoot = detectSingleNestedAppRoot(workspaceRoot);
+        if (projectRoot !== workspaceRoot) {
+            await updateLogs(`[INFO] Auto-detected app root: ${path.relative(workspaceRoot, projectRoot)}`);
+        }
 
         // Build Pipeline
         if (project.packageManager && project.buildCommand) {
+            // Preflight: if user configured "npm/yarn/pnpm build" but package.json has no build script,
+            // fail with a clear message (common when uploading plain HTML or selecting the wrong root).
+            try {
+                const pkgPath = path.join(projectRoot, "package.json");
+                if (fs.existsSync(pkgPath)) {
+                    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+                    const scripts = pkg?.scripts || {};
+                    const cmd = String(project.buildCommand).trim().toLowerCase();
+                    const looksLikeScriptBuild =
+                        cmd === "npm run build" ||
+                        cmd === "yarn build" ||
+                        cmd === "pnpm build" ||
+                        cmd === "pnpm run build";
+
+                    if (looksLikeScriptBuild && !scripts.build) {
+                        throw new Error(
+                            `package.json is missing a "build" script. ` +
+                            `Either add it, or clear Build Command and set Output Directory to "." for plain HTML, ` +
+                            `or select the correct project root.`
+                        );
+                    }
+                }
+            } catch (err) {
+                if (err instanceof Error && err.message.includes('missing a "build" script')) throw err;
+            }
+
             await updateLogs(`Running install: ${project.packageManager}...`);
             const installCmd = project.packageManager === "pnpm" ? "pnpm i" : (project.packageManager === "yarn" ? "yarn install" : "npm ci");
             await execPromise(installCmd, { cwd: projectRoot });
