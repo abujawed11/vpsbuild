@@ -9,6 +9,7 @@ const execPromise = util.promisify(exec);
 const { generateDockerCompose, writeDockerCompose } = require("../lib/docker-compose-generator");
 const { generateNodeBackendDockerfile, generatePythonBackendDockerfile, writeDockerfile } = require("../lib/docker-generator");
 const { writeNginxConfig, reloadNginx, healthCheckFromNginx } = require("../lib/nginx-config-generator");
+const { detectCaseSensitivityIssue, formatCaseSensitivityError } = require("../lib/case-sensitivity-checker");
 
 const router = express.Router();
 
@@ -387,8 +388,28 @@ async function runBuild(project, deploymentId) {
             const projectEnvVars = await prisma.envVar.findMany({ where: { projectId: project.id } });
             projectEnvVars.forEach(ev => { env[ev.key] = ev.value; });
 
-            await execPromise(project.buildCommand, { cwd: projectRoot, env });
-            await updateLogs("Build completed successfully.");
+            try {
+                await execPromise(project.buildCommand, { cwd: projectRoot, env });
+                await updateLogs("Build completed successfully.");
+            } catch (buildError) {
+                // Check if this is a case-sensitivity issue
+                const errorOutput = buildError.stderr || buildError.stdout || buildError.message || '';
+                const caseIssue = detectCaseSensitivityIssue(errorOutput, projectRoot);
+
+                if (caseIssue) {
+                    // Format helpful error message
+                    await updateLogs("[ERROR] Command failed: " + project.buildCommand);
+                    await updateLogs(formatCaseSensitivityError(caseIssue));
+                } else {
+                    // Regular build error
+                    await updateLogs("[ERROR] Command failed: " + project.buildCommand);
+                    if (errorOutput) {
+                        await updateLogs(errorOutput);
+                    }
+                }
+
+                throw buildError; // Re-throw to be caught by outer try-catch
+            }
         } else {
             await updateLogs("No build command specified, using workspace as-is.");
         }
