@@ -148,7 +148,13 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     setStep(4);
                     setLoading(false);
                 } else {
-                    throw new Error("Upload failed");
+                    let message = `Upload failed (${xhr.status})`;
+                    try {
+                        const parsed = JSON.parse(xhr.responseText || "{}");
+                        if (parsed?.error) message = parsed.error;
+                    } catch {}
+                    alert(message);
+                    setLoading(false);
                 }
             };
 

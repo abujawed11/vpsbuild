@@ -637,8 +637,24 @@ const upload = multer({
   }
 });
 
+const uploadZipSingle = (req, res, next) => {
+  upload.single("file")(req, res, (err) => {
+    if (!err) return next();
+
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ error: "ZIP file too large (max 100MB)" });
+    }
+
+    if (err.message?.includes("Only ZIP files are allowed")) {
+      return res.status(400).json({ error: "Only ZIP files are allowed" });
+    }
+
+    return res.status(400).json({ error: err.message || "Upload failed" });
+  });
+};
+
 // POST /api/projects/:id/upload-zip
-router.post("/:id/upload-zip", authRequired, upload.single("file"), async (req, res) => {
+router.post("/:id/upload-zip", authRequired, uploadZipSingle, async (req, res) => {
   const { id: projectId } = req.params;
 
   try {
