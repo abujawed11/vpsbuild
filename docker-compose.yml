@@ -25,10 +25,14 @@ services:
       # Single source of truth for public URL
       PUBLIC_BASE_URL: http://93.127.199.118.sslip.io:8088
       BASE_DOMAIN: 93.127.199.118.sslip.io
+      GATEWAY_NETWORK: vpsbuilds_default
+      DOCKER_ENV: "true"
     volumes:
       - ./vps-back:/app
       - /app/node_modules
       - static_sites:/srv/static-sites
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gateway_projects:/nginx/projects
     depends_on:
       - db
 
@@ -53,6 +57,7 @@ services:
     volumes:
       - ./nginx-vps.conf:/etc/nginx/conf.d/default.conf
       - static_sites:/srv/static-sites
+      - gateway_projects:/etc/nginx/conf.d/projects
     depends_on:
       - backend
       - frontend
