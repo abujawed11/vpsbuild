@@ -66,3 +66,7 @@ volumes:
   postgres_data:
   static_sites:
   gateway_projects:
+
+networks:
+  default:
+    name: vpsbuilds_default
