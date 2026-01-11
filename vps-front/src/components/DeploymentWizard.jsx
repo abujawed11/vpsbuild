@@ -55,7 +55,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
     // Effects
     useEffect(() => {
-        if (siteName && step === 1) {
+        if (siteName && step === 2) {
             setSiteSlug(siteName.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50));
         }
     }, [siteName, step]);
