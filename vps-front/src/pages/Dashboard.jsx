@@ -11,12 +11,25 @@ export default function Dashboard() {
     const [ungroupedProjects, setUngroupedProjects] = useState([]);
     const [showCreateGroup, setShowCreateGroup] = useState(false);
     const [newGroupName, setNewGroupName] = useState("");
+    const [showSuccessMessage, setShowSuccessMessage] = useState(false);
 
     useEffect(() => {
         const token = getToken();
         if (!token) {
             nav("/login");
             return;
+        }
+
+        // Check if returning from GitHub OAuth
+        const params = new URLSearchParams(window.location.search);
+        const connected = params.get("connected");
+
+        if (connected === "1") {
+            setShowSuccessMessage(true);
+            // Clean up URL
+            window.history.replaceState({}, "", "/dashboard");
+            // Hide message after 5 seconds
+            setTimeout(() => setShowSuccessMessage(false), 5000);
         }
 
         apiFetch("/me", { token })
@@ -116,14 +129,26 @@ export default function Dashboard() {
                 </div>
             </div>
             
+            {showSuccessMessage && (
+                <div style={{ marginBottom: 20, padding: "15px 20px", background: "#d4edda", borderRadius: 8, border: "1px solid #c3e6cb", color: "#155724", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        <span style={{ fontWeight: 500 }}>GitHub connected successfully! You can now deploy sites.</span>
+                    </div>
+                    <button onClick={() => setShowSuccessMessage(false)} style={{ background: "none", border: "none", color: "#155724", cursor: "pointer", fontSize: "1.2em", padding: "0 5px" }}>×</button>
+                </div>
+            )}
+
             {showCreateGroup && (
                 <div style={{ marginBottom: 30, padding: 20, background: "#f5f5f5", borderRadius: 8 }}>
                     <h3>Create New Project</h3>
                     <div style={{ display: "flex", gap: 10 }}>
-                        <input 
-                            value={newGroupName} 
-                            onChange={e => setNewGroupName(e.target.value)} 
-                            placeholder="Project Name" 
+                        <input
+                            value={newGroupName}
+                            onChange={e => setNewGroupName(e.target.value)}
+                            placeholder="Project Name"
                             style={{ flex: 1, padding: 10, borderRadius: 4, border: "1px solid #ddd" }}
                             autoFocus
                         />

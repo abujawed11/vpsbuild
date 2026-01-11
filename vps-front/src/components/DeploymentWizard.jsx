@@ -5,6 +5,10 @@ import { apiFetch } from "../lib/api";
 export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
+
+    const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
+    const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
+    const baseUrl = `http://${baseDomain}${basePort}`;
     
     // Step 1: Create Site
     const [siteName, setSiteName] = useState("");
@@ -265,13 +269,27 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     <div style={{ marginBottom: 25 }}>
                         <label style={labelStyle}>Site URL</label>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f5f5f5", padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd" }}>
-                            <span style={{ color: "#888" }}>https://</span>
-                            <input 
-                                value={siteSlug} 
-                                onChange={e => setSiteSlug(e.target.value)} 
-                                style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }} 
-                            />
-                            <span style={{ color: "#888" }}>.{import.meta.env.VITE_BASE_DOMAIN || 'localhost'}</span>
+                            {siteType === "server" ? (
+                                <>
+                                    <span style={{ color: "#888" }}>{baseUrl}/apps/</span>
+                                    <input
+                                        value={siteSlug}
+                                        onChange={e => setSiteSlug(e.target.value)}
+                                        style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }}
+                                    />
+                                    <span style={{ color: "#888" }}>/</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span style={{ color: "#888" }}>http://</span>
+                                    <input
+                                        value={siteSlug}
+                                        onChange={e => setSiteSlug(e.target.value)}
+                                        style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }}
+                                    />
+                                    <span style={{ color: "#888" }}>.{baseDomain}{basePort}</span>
+                                </>
+                            )}
                         </div>
                     </div>
                     <button onClick={() => { fetchRepos(); setStep(2); }} disabled={!siteSlug} style={primaryBtn}>
@@ -461,9 +479,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     
                     {deployment?.status === "DEPLOYED" && (() => {
                         const slug = projectData?.slug || siteSlug;
-                        const domain = import.meta.env.VITE_BASE_DOMAIN || 'localhost';
-                        const port = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : '';
-                        const siteUrl = `http://${slug}.${domain}${port}`;
+                        const isServer = siteType === "server" || projectData?.deployType === "BACKEND";
+                        const siteUrl = isServer ? `${baseUrl}/apps/${slug}/` : `http://${slug}.${baseDomain}${basePort}`;
+                        const siteLabel = isServer ? `${baseDomain}${basePort}/apps/${slug}/` : `${slug}.${baseDomain}${basePort}`;
 
                         return (
                             <div style={{ marginTop: 25, textAlign: "center", padding: 20, background: "#e8f5e9", borderRadius: 8, border: "1px solid #c8e6c9" }}>
@@ -473,7 +491,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                                     display: "inline-block", marginTop: 10, padding: "10px 20px",
                                     background: "#2e7d32", color: "white", textDecoration: "none", borderRadius: 6, fontWeight: "bold"
                                 }}>
-                                    Visit {slug}.{domain}{port}
+                                    Visit {siteLabel}
                                 </a>
                                 <div style={{ marginTop: 15 }}>
                                     <button onClick={onComplete} style={{ background: "transparent", border: "none", textDecoration: "underline", cursor: "pointer", color: "#2e7d32" }}>Back to Dashboard</button>
@@ -534,4 +552,3 @@ const labelStyle = { display: "block", marginBottom: 6, fontWeight: 500, fontSiz
 const inputStyle = { width: "100%", padding: "10px 12px", border: "1px solid #ddd", borderRadius: 6, fontSize: "1em" };
 const primaryBtn = { background: "#2196F3", color: "white", padding: "10px 20px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: "1em", fontWeight: 500, flex: 1 };
 const secondaryBtn = { background: "#f5f5f5", color: "#333", padding: "10px 20px", border: "1px solid #ddd", borderRadius: 6, cursor: "pointer", fontSize: "1em", fontWeight: 500 };
-

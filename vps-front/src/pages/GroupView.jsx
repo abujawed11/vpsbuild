@@ -12,6 +12,10 @@ export default function GroupView() {
     const [showWizard, setShowWizard] = useState(false);
     const [err, setErr] = useState("");
 
+    const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
+    const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
+    const baseUrl = `http://${baseDomain}${basePort}`;
+
     useEffect(() => {
         if (!getToken()) {
             nav("/login");
@@ -111,9 +115,9 @@ export default function GroupView() {
                         projects.map(p => {
                             const latestStatus = p.latestDeployment?.status || "IDLE";
                             const isDeployed = p.hasDeployedVersion;
-                            const domain = import.meta.env.VITE_BASE_DOMAIN || 'localhost';
-                            const port = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : '';
-                            const siteUrl = `http://${p.slug}.${domain}${port}`;
+                            const isServer = p.deployType === "BACKEND";
+                            const siteUrl = isServer ? `${baseUrl}/apps/${p.slug}/` : `http://${p.slug}.${baseDomain}${basePort}`;
+                            const siteLabel = isServer ? `${baseDomain}${basePort}/apps/${p.slug}/` : `${p.slug}.${baseDomain}${basePort}`;
 
                             const statusColors = {
                                 "DEPLOYED": { bg: "#e8f5e9", color: "#2e7d32" },
@@ -129,15 +133,15 @@ export default function GroupView() {
                                 <div key={p.id} style={{ border: "1px solid #eee", padding: 20, borderRadius: 12, background: "white", boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
                                     <h3 style={{ margin: "0 0 10px 0" }}>{p.name}</h3>
                                     <div style={{ fontSize: "0.9em", color: "#666", marginBottom: 15 }}>
-                                        {isDeployed ? (
-                                            <div>
-                                                URL: <a href={siteUrl} target="_blank" rel="noreferrer" style={{ color: "#2196F3", textDecoration: "none", fontWeight: 500 }}>
-                                                    {p.slug}.{domain}{port}
-                                                </a>
-                                            </div>
-                                        ) : (
-                                            <div style={{ color: "#999", fontStyle: "italic" }}>Not deployed yet</div>
-                                        )}
+                                         {isDeployed ? (
+                                             <div>
+                                                 URL: <a href={siteUrl} target="_blank" rel="noreferrer" style={{ color: "#2196F3", textDecoration: "none", fontWeight: 500 }}>
+                                                    {siteLabel}
+                                                 </a>
+                                             </div>
+                                         ) : (
+                                             <div style={{ color: "#999", fontStyle: "italic" }}>Not deployed yet</div>
+                                         )}
                                     </div>
                                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                         <span style={{
