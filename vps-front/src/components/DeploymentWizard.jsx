@@ -287,6 +287,48 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
         setNewEnv({ key: "", value: "" });
     };
 
+    const handleEnvFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const content = event.target.result;
+            const newVars = [];
+            const lines = content.split('\n');
+            
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line || line.startsWith('#')) return;
+                
+                const splitIndex = line.indexOf('=');
+                if (splitIndex === -1) return;
+                
+                const key = line.substring(0, splitIndex).trim();
+                let value = line.substring(splitIndex + 1).trim();
+
+                // Remove surrounding quotes
+                if ((value.startsWith('"') && value.endsWith('"')) || 
+                    (value.startsWith("'") && value.endsWith("'"))) {
+                    value = value.slice(1, -1);
+                }
+
+                if (key) {
+                    newVars.push({ key, value });
+                }
+            });
+
+            if (newVars.length > 0) {
+                const existingKeys = new Set(envVars.map(ev => ev.key));
+                const uniqueNewVars = newVars.filter(ev => !existingKeys.has(ev.key));
+                setEnvVars([...envVars, ...uniqueNewVars]);
+                alert(`Imported ${uniqueNewVars.length} variables.`);
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = null; 
+    };
+
     return (
         <div style={{ background: "white", padding: 30, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.08)" }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 30 }}>
@@ -629,7 +671,27 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
             {step === 6 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 6: Environment Variables</h3>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                        <h3 style={{...stepTitle, marginBottom: 0}}>Step 6: Environment Variables</h3>
+                        <div>
+                            <input 
+                                type="file" 
+                                id="env-upload" 
+                                accept=".env,text/plain" 
+                                style={{ display: "none" }} 
+                                onChange={handleEnvFileUpload}
+                            />
+                            <button 
+                                onClick={() => document.getElementById('env-upload').click()}
+                                style={{ 
+                                    padding: "6px 12px", fontSize: "0.85em", background: "#f5f5f5", 
+                                    border: "1px solid #ddd", borderRadius: 4, cursor: "pointer"
+                                }}
+                            >
+                                📂 Import .env
+                            </button>
+                        </div>
+                    </div>
                     <p style={stepDesc}>Add keys like VITE_API_URL. (Build-time only)</p>
                     <div style={{ marginBottom: 25 }}>
                         {envVars.length > 0 && (
