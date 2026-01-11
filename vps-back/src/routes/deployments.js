@@ -11,6 +11,7 @@ const { generateNodeBackendDockerfile, generatePythonBackendDockerfile, writeDoc
 const { writeNginxConfig, reloadNginx, healthCheckFromNginx } = require("../lib/nginx-config-generator");
 const { detectCaseSensitivityIssue, formatCaseSensitivityError } = require("../lib/case-sensitivity-checker");
 const { detectPythonFramework, buildPythonStartCommand, validatePythonStartCommand } = require("../lib/python-framework-detector");
+const { validatePythonProject } = require("../lib/python-validator");
 
 const router = express.Router();
 
@@ -188,6 +189,28 @@ async function runServerDeploy(project, deploymentId) {
 
             let dockerfileContent;
             if (runtime === "python") {
+                // Pre-flight validation: Check project structure
+                await updateLogs("=== VALIDATING PYTHON PROJECT ===");
+                const projectValidation = validatePythonProject(projectRoot, config.startCommand);
+
+                if (!projectValidation.valid) {
+                    await updateLogs("[ERROR] Project validation failed:");
+                    for (const issue of projectValidation.issues) {
+                        await updateLogs(`  ✗ ${issue}`);
+                    }
+                    throw new Error(
+                        "Python project validation failed. Please fix the issues above before deploying."
+                    );
+                }
+
+                if (projectValidation.warnings.length > 0) {
+                    for (const warning of projectValidation.warnings) {
+                        await updateLogs(`[WARN] ${warning}`);
+                    }
+                }
+
+                await updateLogs("[OK] Project structure validated");
+
                 // Auto-detect framework and build proper start command
                 const framework = detectPythonFramework(projectRoot, config.startCommand);
                 await updateLogs(`[INFO] Detected framework: ${framework.framework} (${framework.server})`);
@@ -262,28 +285,68 @@ async function runServerDeploy(project, deploymentId) {
 
         // Verify container is actually running (not crashed immediately)
         await updateLogs("Verifying container status...");
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for startup
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3s for startup
 
         try {
             const { stdout: containerStatus } = await execPromise(`docker inspect --format='{{.State.Status}}' ${project.slug}`);
             const status = containerStatus.trim();
 
             if (status !== 'running') {
-                // Container crashed! Get logs
+                // Container crashed! Stop restart attempts first
                 await updateLogs(`[ERROR] Container status: ${status}`);
 
+                if (status === 'restarting') {
+                    await updateLogs("Stopping restart loop to inspect logs...");
+                    await execPromise(`docker update --restart=no ${project.slug}`).catch(() => {});
+                    await execPromise(`docker stop ${project.slug}`).catch(() => {});
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                // Get detailed container info
                 try {
-                    const { stdout: logs } = await execPromise(`docker logs ${project.slug}`);
+                    const { stdout: exitInfo } = await execPromise(
+                        `docker inspect --format='ExitCode: {{.State.ExitCode}} | Error: {{.State.Error}}' ${project.slug}`
+                    );
+                    await updateLogs(`[INFO] ${exitInfo.trim()}`);
+                } catch (infoErr) {
+                    // Ignore
+                }
+
+                // Get both stdout and stderr logs
+                try {
+                    const { stdout: logs, stderr: errLogs } = await execPromise(`docker logs ${project.slug} 2>&1`);
+                    const allLogs = (logs + errLogs).trim();
+
                     await updateLogs("=== CONTAINER LOGS ===");
-                    await updateLogs(logs);
+                    if (allLogs) {
+                        await updateLogs(allLogs);
+                    } else {
+                        await updateLogs("[WARN] No logs captured. Container may be exiting before startup.");
+
+                        // Try to inspect the Dockerfile CMD
+                        await updateLogs("\n=== TROUBLESHOOTING ===");
+                        await updateLogs("Checking generated Dockerfile...");
+
+                        const dockerfilePath = path.join(projectRoot, "Dockerfile");
+                        if (fs.existsSync(dockerfilePath)) {
+                            const dockerfileContent = fs.readFileSync(dockerfilePath, 'utf8');
+                            const cmdLine = dockerfileContent.split('\n').find(line => line.startsWith('CMD'));
+                            await updateLogs(`Dockerfile CMD: ${cmdLine || 'not found'}`);
+                        }
+
+                        await updateLogs("\nCommon causes:");
+                        await updateLogs("1. requirements.txt missing dependencies");
+                        await updateLogs("2. Start command syntax error");
+                        await updateLogs("3. App module not found (check entry point)");
+                        await updateLogs("4. Port already in use inside container");
+                    }
                 } catch (logErr) {
-                    await updateLogs("[ERROR] Could not retrieve container logs");
+                    await updateLogs("[ERROR] Could not retrieve container logs: " + logErr.message);
                 }
 
                 throw new Error(
-                    `Container crashed immediately after starting. Status: ${status}. ` +
-                    `This usually means your start command is incorrect or the app failed to start. ` +
-                    `Check the container logs above for details.`
+                    `Container crashed immediately after starting (status: ${status}). ` +
+                    `Check the container logs and troubleshooting info above.`
                 );
             }
 
