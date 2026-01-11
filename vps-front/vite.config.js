@@ -14,9 +14,14 @@ export default defineConfig({
       '93.127.199.118',
       'localhost',
     ],
+    hmr: {
+      clientPort: 8088,
+      host: '93.127.199.118.sslip.io',
+      protocol: 'ws',
+    },
     proxy: {
       '/api': {
-        target: 'http://backend:5000',
+        target: process.env.VITE_API_BACKEND || 'http://backend:5000',
         changeOrigin: true,
       },
     },
