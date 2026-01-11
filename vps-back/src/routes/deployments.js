@@ -10,6 +10,7 @@ const { generateDockerCompose, writeDockerCompose } = require("../lib/docker-com
 const { generateNodeBackendDockerfile, generatePythonBackendDockerfile, writeDockerfile } = require("../lib/docker-generator");
 const { writeNginxConfig, reloadNginx, healthCheckFromNginx } = require("../lib/nginx-config-generator");
 const { detectCaseSensitivityIssue, formatCaseSensitivityError } = require("../lib/case-sensitivity-checker");
+const { detectPythonFramework, buildPythonStartCommand, validatePythonStartCommand } = require("../lib/python-framework-detector");
 
 const router = express.Router();
 
@@ -187,7 +188,34 @@ async function runServerDeploy(project, deploymentId) {
 
             let dockerfileContent;
             if (runtime === "python") {
-                dockerfileContent = generatePythonBackendDockerfile(config);
+                // Auto-detect framework and build proper start command
+                const framework = detectPythonFramework(projectRoot, config.startCommand);
+                await updateLogs(`[INFO] Detected framework: ${framework.framework} (${framework.server})`);
+
+                // Build production-ready command with host and port binding
+                const optimizedStartCommand = buildPythonStartCommand(config.startCommand, config.port);
+
+                if (optimizedStartCommand !== config.startCommand) {
+                    await updateLogs(`[INFO] Optimized start command: ${optimizedStartCommand}`);
+                }
+
+                // Validate the command
+                const validation = validatePythonStartCommand(config.startCommand, framework.framework);
+                if (!validation.valid) {
+                    for (const issue of validation.issues) {
+                        await updateLogs(`[WARN] ${issue}`);
+                    }
+                }
+                if (validation.suggestions.length > 0) {
+                    for (const suggestion of validation.suggestions) {
+                        await updateLogs(`[TIP] ${suggestion}`);
+                    }
+                }
+
+                dockerfileContent = generatePythonBackendDockerfile({
+                    ...config,
+                    startCommand: optimizedStartCommand
+                });
             } else {
                 dockerfileContent = generateNodeBackendDockerfile(config);
             }
@@ -230,6 +258,41 @@ async function runServerDeploy(project, deploymentId) {
             await updateLogs(`Container ${project.slug} started`);
         } catch (err) {
             throw new Error(`Container start failed: ${err.message}`);
+        }
+
+        // Verify container is actually running (not crashed immediately)
+        await updateLogs("Verifying container status...");
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for startup
+
+        try {
+            const { stdout: containerStatus } = await execPromise(`docker inspect --format='{{.State.Status}}' ${project.slug}`);
+            const status = containerStatus.trim();
+
+            if (status !== 'running') {
+                // Container crashed! Get logs
+                await updateLogs(`[ERROR] Container status: ${status}`);
+
+                try {
+                    const { stdout: logs } = await execPromise(`docker logs ${project.slug}`);
+                    await updateLogs("=== CONTAINER LOGS ===");
+                    await updateLogs(logs);
+                } catch (logErr) {
+                    await updateLogs("[ERROR] Could not retrieve container logs");
+                }
+
+                throw new Error(
+                    `Container crashed immediately after starting. Status: ${status}. ` +
+                    `This usually means your start command is incorrect or the app failed to start. ` +
+                    `Check the container logs above for details.`
+                );
+            }
+
+            await updateLogs(`[OK] Container is running`);
+        } catch (err) {
+            if (err.message.includes('Container crashed')) {
+                throw err; // Re-throw our detailed error
+            }
+            throw new Error(`Failed to verify container status: ${err.message}`);
         }
 
         // Connect to gateway network

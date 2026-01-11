@@ -46,7 +46,7 @@ function generatePythonBackendDockerfile(config) {
 
   // Default install command
   let installCmd = buildCommand || "pip install -r requirements.txt";
-  
+
   // Try to detect requirements file from command to COPY it
   // Look for "-r filename" or just assume requirements.txt if not found
   let reqFile = "requirements.txt";
@@ -59,7 +59,9 @@ function generatePythonBackendDockerfile(config) {
       reqFile = "pyproject.toml poetry.lock";
   }
 
-  return `FROM python:3.9-slim
+  // Use shell form for CMD to allow variable expansion
+  // The start command will be pre-processed to include --host and --port
+  return `FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -72,11 +74,12 @@ COPY . .
 
 # Environment
 ENV PORT=${port}
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE ${port}
 
-# Start
-CMD ["sh", "-c", "${startCommand}"]
+# Start (shell form allows variable expansion)
+CMD ${startCommand}
 `;
 }
 
