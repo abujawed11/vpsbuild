@@ -115,9 +115,9 @@ export default function GroupView() {
                         projects.map(p => {
                             const latestStatus = p.latestDeployment?.status || "IDLE";
                             const isDeployed = p.hasDeployedVersion;
-                            const isServer = p.deployType === "BACKEND";
-                            const siteUrl = isServer ? `${baseUrl}/apps/${p.slug}/` : `http://${p.slug}.${baseDomain}${basePort}`;
-                            const siteLabel = isServer ? `${baseDomain}${basePort}/apps/${p.slug}/` : `${p.slug}.${baseDomain}${basePort}`;
+                            // Both server and frontend now use subdomain-based routing
+                            const siteUrl = `http://${p.slug}.${baseDomain}${basePort}`;
+                            const siteLabel = `${p.slug}.${baseDomain}${basePort}`;
 
                             const statusColors = {
                                 "DEPLOYED": { bg: "#e8f5e9", color: "#2e7d32" },

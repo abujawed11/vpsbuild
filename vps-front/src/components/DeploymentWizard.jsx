@@ -479,9 +479,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     
                     {deployment?.status === "DEPLOYED" && (() => {
                         const slug = projectData?.slug || siteSlug;
-                        const isServer = siteType === "server" || projectData?.deployType === "BACKEND";
-                        const siteUrl = isServer ? `${baseUrl}/apps/${slug}/` : `http://${slug}.${baseDomain}${basePort}`;
-                        const siteLabel = isServer ? `${baseDomain}${basePort}/apps/${slug}/` : `${slug}.${baseDomain}${basePort}`;
+                        // Both server and frontend now use subdomain-based routing
+                        const siteUrl = `http://${slug}.${baseDomain}${basePort}`;
+                        const siteLabel = `${slug}.${baseDomain}${basePort}`;
 
                         return (
                             <div style={{ marginTop: 25, textAlign: "center", padding: 20, background: "#e8f5e9", borderRadius: 8, border: "1px solid #c8e6c9" }}>
