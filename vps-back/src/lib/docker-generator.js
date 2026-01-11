@@ -42,15 +42,30 @@ CMD sh -c "${wrappedStart}"
 }
 
 function generatePythonBackendDockerfile(config) {
-  const { port = 5000, startCommand = "python app.py" } = config;
+  const { port = 5000, startCommand = "python app.py", buildCommand } = config;
+
+  // Default install command
+  let installCmd = buildCommand || "pip install -r requirements.txt";
+  
+  // Try to detect requirements file from command to COPY it
+  // Look for "-r filename" or just assume requirements.txt if not found
+  let reqFile = "requirements.txt";
+  const match = installCmd.match(/-r\s+([^\s]+)/);
+  if (match && match[1]) {
+      reqFile = match[1];
+  } else if (installCmd.includes("Pipfile")) {
+      reqFile = "Pipfile Pipfile.lock";
+  } else if (installCmd.includes("poetry")) {
+      reqFile = "pyproject.toml poetry.lock";
+  }
 
   return `FROM python:3.9-slim
 
 WORKDIR /app
 
 # Install dependencies
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY ${reqFile} ./
+RUN ${installCmd}
 
 # Copy source
 COPY . .

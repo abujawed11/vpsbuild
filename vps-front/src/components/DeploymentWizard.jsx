@@ -202,6 +202,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 setBuildSettings({
                     packageManager: res.project.packageManager || "npm",
                     startCommand: res.project.startCommand || "npm start",
+                    buildCommand: res.project.buildCommand || "",
                     port: res.project.port || 3000
                 });
             } else {
@@ -225,6 +226,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 ? {
                     packageManager: buildSettings.packageManager,
                     startCommand: buildSettings.startCommand,
+                    buildCommand: buildSettings.buildCommand,
                     port: parseInt(buildSettings.port)
                 }
                 : {
@@ -600,6 +602,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                                 <option value="npm">npm</option>
                                 <option value="yarn">yarn</option>
                                 <option value="pnpm">pnpm</option>
+                                <option value="pip">pip (Python)</option>
+                                <option value="pipenv">pipenv (Python)</option>
+                                <option value="poetry">poetry (Python)</option>
                                 {siteType !== "server" && <option value="static">None (Static HTML)</option>}
                             </select>
                         </div>
@@ -607,11 +612,20 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                         {siteType === "server" ? (
                             <>
                                 <div>
+                                    <label style={labelStyle}>Install Command</label>
+                                    <input
+                                        value={buildSettings.buildCommand || ""}
+                                        onChange={e => setBuildSettings({...buildSettings, buildCommand: e.target.value})}
+                                        placeholder="e.g. pip install -r requirements.txt"
+                                        style={inputStyle}
+                                    />
+                                </div>
+                                <div>
                                     <label style={labelStyle}>Start Command</label>
                                     <input
                                         value={buildSettings.startCommand}
                                         onChange={e => setBuildSettings({...buildSettings, startCommand: e.target.value})}
-                                        placeholder="e.g. npm start, node server.js"
+                                        placeholder="e.g. npm start, python app.py"
                                         style={inputStyle}
                                     />
                                 </div>
