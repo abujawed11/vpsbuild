@@ -182,9 +182,45 @@ async function runServerDeploy(project, deploymentId) {
 
             // Detect runtime and generate appropriate Dockerfile
             const runtime = project.runtime || "node";
+            let startCommand = project.startCommand || "npm start";
+
+            // Check for dev tools in start command (e.g., nodemon)
+            // This helps users who accidentally set "npm run dev" as start command
+            const pkgJsonPath = path.join(projectRoot, "package.json");
+            let actualCommand = startCommand;
+
+            // If start command is "npm run <script>", resolve it
+            if (fs.existsSync(pkgJsonPath)) {
+                const npmRunMatch = startCommand.match(/(?:npm|yarn|pnpm)\s+(?:run\s+)?(\w+)/);
+                if (npmRunMatch) {
+                    const scriptName = npmRunMatch[1];
+                    try {
+                        const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+                        if (pkgJson.scripts && pkgJson.scripts[scriptName]) {
+                            actualCommand = pkgJson.scripts[scriptName];
+                            await updateLogs(`[INFO] Resolved '${scriptName}' script: ${actualCommand}`);
+                        }
+                    } catch (e) {
+                        await updateLogs(`[WARN] Could not read package.json: ${e.message}`);
+                    }
+                }
+            }
+
+            // Check if actual command uses dev tools
+            if (actualCommand.includes("nodemon") || actualCommand.includes("ts-node-dev")) {
+                await updateLogs("[WARN] Start command uses development tools (nodemon/ts-node-dev)");
+                await updateLogs("[INFO] Auto-fixing: Replacing with production-safe alternative");
+
+                // Replace nodemon with node, ts-node-dev with ts-node
+                const fixedCommand = actualCommand.replace(/nodemon/gi, 'node').replace(/ts-node-dev/gi, 'ts-node');
+                await updateLogs(`[INFO] Original: ${actualCommand}`);
+                await updateLogs(`[INFO] Fixed: ${fixedCommand}`);
+                startCommand = fixedCommand;
+            }
+
             const config = {
                 packageManager: project.packageManager || "npm",
-                startCommand: project.startCommand || "npm start",
+                startCommand: startCommand,
                 port: project.port || 3000
             };
 

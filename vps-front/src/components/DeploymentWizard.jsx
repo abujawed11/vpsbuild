@@ -48,6 +48,10 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     // Step 5: Env Vars
     const [envVars, setEnvVars] = useState([]);
     const [newEnv, setNewEnv] = useState({ key: "", value: "" });
+    const [envMode, setEnvMode] = useState("manual"); // "manual", "paste", "upload"
+    const [pasteText, setPasteText] = useState("");
+    const [editingEnvIndex, setEditingEnvIndex] = useState(null);
+    const [editingEnvField, setEditingEnvField] = useState(null); // "key" or "value"
 
     // Step 6: Deploy
     const [deployment, setDeployment] = useState(null);
@@ -328,7 +332,53 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
             }
         };
         reader.readAsText(file);
-        e.target.value = null; 
+        e.target.value = null;
+    };
+
+    const handlePasteText = () => {
+        if (!pasteText.trim()) return;
+
+        const newVars = [];
+        const lines = pasteText.split('\n');
+
+        lines.forEach(line => {
+            line = line.trim();
+            if (!line || line.startsWith('#')) return;
+
+            const splitIndex = line.indexOf('=');
+            if (splitIndex === -1) return;
+
+            const key = line.substring(0, splitIndex).trim();
+            let value = line.substring(splitIndex + 1).trim();
+
+            // Remove surrounding quotes
+            if ((value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.slice(1, -1);
+            }
+
+            if (key) {
+                newVars.push({ key, value });
+            }
+        });
+
+        if (newVars.length > 0) {
+            const existingKeys = new Set(envVars.map(ev => ev.key));
+            const uniqueNewVars = newVars.filter(ev => !existingKeys.has(ev.key));
+            setEnvVars([...envVars, ...uniqueNewVars]);
+            setPasteText("");
+            alert(`Added ${uniqueNewVars.length} variables (${newVars.length - uniqueNewVars.length} duplicates skipped).`);
+        } else {
+            alert("No valid environment variables found in pasted text.");
+        }
+    };
+
+    const handleEnvEdit = (index, field, newValue) => {
+        const updated = [...envVars];
+        updated[index][field] = newValue;
+        setEnvVars(updated);
+        setEditingEnvIndex(null);
+        setEditingEnvField(null);
     };
 
     return (
@@ -685,9 +735,186 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
             {step === 6 && (
                 <div className="fade-in">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                        <h3 style={{...stepTitle, marginBottom: 0}}>Step 6: Environment Variables</h3>
-                        <div>
+                    <h3 style={stepTitle}>Step 6: Environment Variables</h3>
+                    <p style={stepDesc}>
+                        {siteType === "server"
+                            ? "Add runtime environment variables. You can override PORT here if needed."
+                            : "Add keys like VITE_API_URL. (Build-time only)"
+                        }
+                    </p>
+
+                    {/* Tab Switcher */}
+                    <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+                        <button
+                            onClick={() => setEnvMode("manual")}
+                            style={{
+                                flex: 1, padding: 12, borderRadius: 8, border: envMode === "manual" ? "2px solid #2196F3" : "1px solid #ddd",
+                                background: envMode === "manual" ? "#e3f2fd" : "white", cursor: "pointer", fontWeight: 500
+                            }}
+                        >
+                            Manual
+                        </button>
+                        <button
+                            onClick={() => setEnvMode("paste")}
+                            style={{
+                                flex: 1, padding: 12, borderRadius: 8, border: envMode === "paste" ? "2px solid #2196F3" : "1px solid #ddd",
+                                background: envMode === "paste" ? "#e3f2fd" : "white", cursor: "pointer", fontWeight: 500
+                            }}
+                        >
+                            Paste Text
+                        </button>
+                        <button
+                            onClick={() => setEnvMode("upload")}
+                            style={{
+                                flex: 1, padding: 12, borderRadius: 8, border: envMode === "upload" ? "2px solid #2196F3" : "1px solid #ddd",
+                                background: envMode === "upload" ? "#e3f2fd" : "white", cursor: "pointer", fontWeight: 500
+                            }}
+                        >
+                            Upload File
+                        </button>
+                    </div>
+
+                    {/* Existing Variables List (with inline editing) */}
+                    {envVars.length > 0 && (
+                        <div style={{ marginBottom: 15, border: "1px solid #eee", borderRadius: 6, overflow: "hidden" }}>
+                            {envVars.map((ev, i) => (
+                                <div key={i} style={{ display: "flex", gap: 10, padding: 8, background: i % 2 ? "#fafafa" : "white", borderBottom: "1px solid #eee", alignItems: "center" }}>
+                                    {editingEnvIndex === i && editingEnvField === "key" ? (
+                                        <input
+                                            autoFocus
+                                            value={ev.key}
+                                            onChange={e => {
+                                                const updated = [...envVars];
+                                                updated[i].key = e.target.value.toUpperCase();
+                                                setEnvVars(updated);
+                                            }}
+                                            onBlur={() => {
+                                                setEditingEnvIndex(null);
+                                                setEditingEnvField(null);
+                                            }}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                    setEditingEnvIndex(null);
+                                                    setEditingEnvField(null);
+                                                }
+                                            }}
+                                            style={{ flex: 1, fontFamily: "monospace", fontWeight: 600, padding: "4px 8px", border: "2px solid #2196F3", borderRadius: 4 }}
+                                        />
+                                    ) : (
+                                        <div
+                                            onClick={() => {
+                                                setEditingEnvIndex(i);
+                                                setEditingEnvField("key");
+                                            }}
+                                            style={{ flex: 1, fontFamily: "monospace", fontWeight: 600, cursor: "pointer", padding: "4px 8px", borderRadius: 4, transition: "background 0.2s" }}
+                                            onMouseEnter={e => e.currentTarget.style.background = "#e3f2fd"}
+                                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                        >
+                                            {ev.key}
+                                        </div>
+                                    )}
+                                    {editingEnvIndex === i && editingEnvField === "value" ? (
+                                        <input
+                                            autoFocus
+                                            value={ev.value}
+                                            onChange={e => {
+                                                const updated = [...envVars];
+                                                updated[i].value = e.target.value;
+                                                setEnvVars(updated);
+                                            }}
+                                            onBlur={() => {
+                                                setEditingEnvIndex(null);
+                                                setEditingEnvField(null);
+                                            }}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                    setEditingEnvIndex(null);
+                                                    setEditingEnvField(null);
+                                                }
+                                            }}
+                                            style={{ flex: 1, fontFamily: "monospace", color: "#666", padding: "4px 8px", border: "2px solid #2196F3", borderRadius: 4 }}
+                                        />
+                                    ) : (
+                                        <div
+                                            onClick={() => {
+                                                setEditingEnvIndex(i);
+                                                setEditingEnvField("value");
+                                            }}
+                                            style={{ flex: 1, fontFamily: "monospace", color: "#666", cursor: "pointer", padding: "4px 8px", borderRadius: 4, transition: "background 0.2s" }}
+                                            onMouseEnter={e => e.currentTarget.style.background = "#e3f2fd"}
+                                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                        >
+                                            {ev.value}
+                                        </div>
+                                    )}
+                                    <button onClick={() => setEnvVars(envVars.filter((_, idx) => idx !== i))} style={{ background: "none", border: "none", color: "crimson", cursor: "pointer", fontSize: "1.2em" }}>✕</button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Manual Mode */}
+                    {envMode === "manual" && (
+                        <div style={{ marginBottom: 25 }}>
+                            <div style={{ display: "flex", gap: 10 }}>
+                                <input
+                                    placeholder="KEY (e.g. API_URL)"
+                                    value={newEnv.key}
+                                    onChange={e => setNewEnv({...newEnv, key: e.target.value.toUpperCase()})}
+                                    style={{ ...inputStyle, flex: 1 }}
+                                />
+                                <input
+                                    placeholder="Value"
+                                    value={newEnv.value}
+                                    onChange={e => setNewEnv({...newEnv, value: e.target.value})}
+                                    style={{ ...inputStyle, flex: 1 }}
+                                />
+                                <button
+                                    onClick={addEnvVar}
+                                    style={{ background: "#333", color: "white", padding: "0 15px", borderRadius: 4, border: "none", cursor: "pointer" }}
+                                >
+                                    Add
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Paste Text Mode */}
+                    {envMode === "paste" && (
+                        <div style={{ marginBottom: 25 }}>
+                            <textarea
+                                placeholder="Paste your environment variables here:&#10;API_KEY=abc123&#10;DATABASE_URL=postgres://...&#10;PORT=4000"
+                                value={pasteText}
+                                onChange={e => setPasteText(e.target.value)}
+                                style={{
+                                    ...inputStyle,
+                                    minHeight: 150,
+                                    fontFamily: "monospace",
+                                    fontSize: "0.9em",
+                                    resize: "vertical"
+                                }}
+                            />
+                            <button
+                                onClick={handlePasteText}
+                                style={{
+                                    marginTop: 10,
+                                    background: "#333",
+                                    color: "white",
+                                    padding: "10px 20px",
+                                    borderRadius: 4,
+                                    border: "none",
+                                    cursor: "pointer",
+                                    fontWeight: 500
+                                }}
+                            >
+                                Parse & Add
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Upload File Mode */}
+                    {envMode === "upload" && (
+                        <div style={{ marginBottom: 25 }}>
                             <input
                                 type="file"
                                 id="env-upload"
@@ -698,38 +925,26 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                             <button
                                 onClick={() => document.getElementById('env-upload').click()}
                                 style={{
-                                    padding: "6px 12px", fontSize: "0.85em", background: "#f5f5f5",
-                                    border: "1px solid #ddd", borderRadius: 4, cursor: "pointer"
+                                    padding: "12px 20px",
+                                    fontSize: "1em",
+                                    background: "#f5f5f5",
+                                    border: "1px solid #ddd",
+                                    borderRadius: 6,
+                                    cursor: "pointer",
+                                    fontWeight: 500,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8
                                 }}
                             >
-                                📂 Import .env
+                                📂 Choose .env File
                             </button>
+                            <p style={{ fontSize: "0.85em", color: "#666", marginTop: 10 }}>
+                                Upload a .env file to import all variables at once.
+                            </p>
                         </div>
-                    </div>
-                    <p style={stepDesc}>
-                        {siteType === "server"
-                            ? "Add runtime environment variables. You can override PORT here if needed."
-                            : "Add keys like VITE_API_URL. (Build-time only)"
-                        }
-                    </p>
-                    <div style={{ marginBottom: 25 }}>
-                        {envVars.length > 0 && (
-                            <div style={{ marginBottom: 15, border: "1px solid #eee", borderRadius: 6, overflow: "hidden" }}>
-                                {envVars.map((ev, i) => (
-                                    <div key={i} style={{ display: "flex", gap: 10, padding: 8, background: i % 2 ? "#fafafa" : "white", borderBottom: "1px solid #eee" }}>
-                                        <div style={{ flex: 1, fontFamily: "monospace", fontWeight: 600 }}>{ev.key}</div>
-                                        <div style={{ flex: 1, fontFamily: "monospace", color: "#666" }}>{ev.value}</div>
-                                        <button onClick={() => setEnvVars(envVars.filter((_, idx) => idx !== i))} style={{ background: "none", border: "none", color: "crimson", cursor: "pointer" }}>✕</button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                        <div style={{ display: "flex", gap: 10 }}>
-                            <input placeholder="KEY (e.g. API_URL)" value={newEnv.key} onChange={e => setNewEnv({...newEnv, key: e.target.value.toUpperCase()})} style={{ ...inputStyle, flex: 1 }} />
-                            <input placeholder="Value" value={newEnv.value} onChange={e => setNewEnv({...newEnv, value: e.target.value})} style={{ ...inputStyle, flex: 1 }} />
-                            <button onClick={addEnvVar} style={{ background: "#333", color: "white", padding: "0 15px", borderRadius: 4, border: "none", cursor: "pointer" }}>Add</button>
-                        </div>
-                    </div>
+                    )}
+
                     <div style={{ display: "flex", gap: 10 }}>
                         <button onClick={() => setStep(5)} style={secondaryBtn}>← Back</button>
                         <button onClick={startDeploy} style={{ ...primaryBtn, background: "#00C853" }}>Deploy Now 🚀</button>

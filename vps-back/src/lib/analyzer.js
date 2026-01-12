@@ -1,6 +1,79 @@
 const fs = require("fs");
 const path = require("path");
 
+/**
+ * Detect if a command uses development tools
+ */
+function detectDevTools(command) {
+  if (!command) return null;
+
+  const devTools = [
+    { name: "nodemon", pattern: /nodemon/i },
+    { name: "ts-node-dev", pattern: /ts-node-dev/i },
+    { name: "tsx --watch", pattern: /tsx\s+--watch/i },
+    { name: "vite", pattern: /vite(?!\s+build)/i }, // vite but not "vite build"
+    { name: "watch mode", pattern: /--watch\b/i }
+  ];
+
+  for (const tool of devTools) {
+    if (tool.pattern.test(command)) {
+      return tool.name;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Generate production-safe alternative for start command
+ */
+function generateProductionCommand(devCommand, packageJsonScripts) {
+  if (!devCommand) return null;
+
+  // If it's a script reference like "npm run dev", check if "start" exists
+  const npmRunMatch = devCommand.match(/(?:npm|yarn|pnpm)\s+(?:run\s+)?(\w+)/);
+  if (npmRunMatch && packageJsonScripts.start) {
+    return {
+      command: devCommand.replace(npmRunMatch[1], 'start'),
+      reason: `Using 'start' script instead of '${npmRunMatch[1]}'`
+    };
+  }
+
+  // Replace nodemon with node
+  if (/nodemon/i.test(devCommand)) {
+    return {
+      command: devCommand.replace(/nodemon/gi, 'node'),
+      reason: "Replaced 'nodemon' with 'node' for production"
+    };
+  }
+
+  // Replace ts-node-dev with ts-node
+  if (/ts-node-dev/i.test(devCommand)) {
+    return {
+      command: devCommand.replace(/ts-node-dev/gi, 'ts-node'),
+      reason: "Replaced 'ts-node-dev' with 'ts-node' for production"
+    };
+  }
+
+  // Remove --watch flags
+  if (/--watch\b/i.test(devCommand)) {
+    return {
+      command: devCommand.replace(/\s*--watch\b/gi, ''),
+      reason: "Removed '--watch' flag for production"
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Resolve npm run script to actual command
+ */
+function resolveNpmScript(scriptName, packageJsonScripts) {
+  if (!packageJsonScripts || !scriptName) return null;
+  return packageJsonScripts[scriptName] || null;
+}
+
 async function analyzeWorkspace(basePath, relativePath = "") {
   const targetPath = path.join(basePath, relativePath);
   
@@ -11,7 +84,8 @@ async function analyzeWorkspace(basePath, relativePath = "") {
     buildCommand: "",
     startCommand: "",
     outputDir: "",
-    port: 3000
+    port: 3000,
+    warnings: [] // Array to store detection warnings
   };
 
   const files = await fs.promises.readdir(targetPath);
@@ -71,9 +145,70 @@ async function analyzeWorkspace(basePath, relativePath = "") {
     if (scripts.build && !config.buildCommand) {
         config.buildCommand = getBuildCmd("build");
     }
-    
+
     if (!config.outputDir && config.isStatic) {
         config.outputDir = "dist";
+    }
+
+    // Auto-detect start command for backend projects
+    // Check if this is a backend project (has Express, Fastify, etc.)
+    const isBackend = deps["express"] || deps["fastify"] || deps["koa"] || deps["@nestjs/core"];
+
+    if (isBackend && scripts.start) {
+      config.startCommand = getBuildCmd("start");
+
+      // Resolve and check the start script for dev tools
+      const actualStartCommand = resolveNpmScript("start", scripts);
+      if (actualStartCommand) {
+        const devTool = detectDevTools(actualStartCommand);
+        if (devTool) {
+          config.warnings.push({
+            type: "DEV_TOOL_IN_START",
+            message: `Start script uses development tool '${devTool}'`,
+            detectedCommand: actualStartCommand
+          });
+
+          // Try to generate production alternative
+          const prodAlt = generateProductionCommand(actualStartCommand, scripts);
+          if (prodAlt) {
+            config.warnings.push({
+              type: "AUTO_FIX_SUGGESTION",
+              message: prodAlt.reason,
+              suggestedCommand: prodAlt.command
+            });
+
+            // Auto-fix: Update the start command suggestion
+            config.startCommand = prodAlt.command;
+            config.startCommandAutoFixed = true;
+          }
+        }
+      }
+    } else if (isBackend && scripts.dev) {
+      // If no start script but has dev script, check it
+      const actualDevCommand = resolveNpmScript("dev", scripts);
+      if (actualDevCommand) {
+        const devTool = detectDevTools(actualDevCommand);
+        if (devTool) {
+          // Generate production command from dev script
+          const prodAlt = generateProductionCommand(actualDevCommand, scripts);
+          if (prodAlt) {
+            config.startCommand = prodAlt.command;
+            config.warnings.push({
+              type: "DEV_SCRIPT_DETECTED",
+              message: `Auto-converted 'dev' script for production: ${prodAlt.reason}`,
+              originalCommand: actualDevCommand,
+              fixedCommand: prodAlt.command
+            });
+          } else {
+            // Fallback: suggest creating a start script
+            config.warnings.push({
+              type: "NO_START_SCRIPT",
+              message: "No 'start' script found. Please add a production-ready start script to package.json",
+              detectedDevCommand: actualDevCommand
+            });
+          }
+        }
+      }
     }
 
     return config;
