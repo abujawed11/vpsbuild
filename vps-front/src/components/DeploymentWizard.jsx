@@ -639,7 +639,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                                         style={inputStyle}
                                     />
                                     <small style={{ color: "#666", fontSize: "0.85em", display: "block", marginTop: 5 }}>
-                                        Port your app listens on (detected from code)
+                                        Port your app listens on (detected from code). Can be overridden by PORT env var in next step.
                                     </small>
                                 </div>
                             </>
@@ -688,17 +688,17 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                         <h3 style={{...stepTitle, marginBottom: 0}}>Step 6: Environment Variables</h3>
                         <div>
-                            <input 
-                                type="file" 
-                                id="env-upload" 
-                                accept=".env,text/plain" 
-                                style={{ display: "none" }} 
+                            <input
+                                type="file"
+                                id="env-upload"
+                                accept=".env,text/plain"
+                                style={{ display: "none" }}
                                 onChange={handleEnvFileUpload}
                             />
-                            <button 
+                            <button
                                 onClick={() => document.getElementById('env-upload').click()}
-                                style={{ 
-                                    padding: "6px 12px", fontSize: "0.85em", background: "#f5f5f5", 
+                                style={{
+                                    padding: "6px 12px", fontSize: "0.85em", background: "#f5f5f5",
                                     border: "1px solid #ddd", borderRadius: 4, cursor: "pointer"
                                 }}
                             >
@@ -706,7 +706,12 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                             </button>
                         </div>
                     </div>
-                    <p style={stepDesc}>Add keys like VITE_API_URL. (Build-time only)</p>
+                    <p style={stepDesc}>
+                        {siteType === "server"
+                            ? "Add runtime environment variables. You can override PORT here if needed."
+                            : "Add keys like VITE_API_URL. (Build-time only)"
+                        }
+                    </p>
                     <div style={{ marginBottom: 25 }}>
                         {envVars.length > 0 && (
                             <div style={{ marginBottom: 15, border: "1px solid #eee", borderRadius: 6, overflow: "hidden" }}>

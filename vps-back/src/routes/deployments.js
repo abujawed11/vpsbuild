@@ -12,6 +12,7 @@ const { writeNginxConfig, reloadNginx, healthCheckFromNginx } = require("../lib/
 const { detectCaseSensitivityIssue, formatCaseSensitivityError } = require("../lib/case-sensitivity-checker");
 const { detectPythonFramework, buildPythonStartCommand, validatePythonStartCommand } = require("../lib/python-framework-detector");
 const { validatePythonProject } = require("../lib/python-validator");
+const { streamCommand } = require("../lib/stream-command");
 
 const router = express.Router();
 
@@ -256,9 +257,25 @@ async function runServerDeploy(project, deploymentId) {
         const imageTag = `${project.slug}:latest`;
 
         try {
-            await execPromise(`docker build -t ${imageTag} "${projectRoot}"`, { timeout: 300000 });
-            await updateLogs("Image built successfully");
+            // Stream docker build output to logs in real-time
+            await streamCommand(
+                `docker build -t ${imageTag} "${projectRoot}"`,
+                { cwd: projectRoot },
+                async (line) => {
+                    // Filter out some verbose Docker messages but keep important ones
+                    const trimmed = line.trim();
+                    if (trimmed &&
+                        !trimmed.startsWith('#') &&
+                        !trimmed.startsWith('SECURITY WARNING:')) {
+                        await updateLogs(trimmed);
+                    }
+                }
+            );
+            await updateLogs("[OK] Image built successfully");
         } catch (err) {
+            await updateLogs("[ERROR] Docker build failed");
+            if (err.stdout) await updateLogs(err.stdout);
+            if (err.stderr) await updateLogs(err.stderr);
             throw new Error(`Docker build failed: ${err.message}`);
         }
 
@@ -269,12 +286,27 @@ async function runServerDeploy(project, deploymentId) {
 
         // Get environment variables
         const envVars = await prisma.envVar.findMany({ where: { projectId: project.id } });
+
+        // Check if user has defined PORT in env vars (env vars take priority)
+        const userDefinedPort = envVars.find(ev => ev.key === 'PORT');
+        const effectivePort = userDefinedPort ? parseInt(userDefinedPort.value) : (project.port || 3000);
+
+        // Build env flags - if user defined PORT, it's already in envVars
         const envFlags = envVars.map(ev => `-e ${ev.key}="${ev.value}"`).join(' ');
-        const portEnv = `-e PORT=${project.port || 3000} -e NODE_ENV=production`;
+
+        // Only inject PORT if user hasn't defined it
+        const portEnv = userDefinedPort ? '' : `-e PORT=${project.port || 3000}`;
+        const nodeEnv = `-e NODE_ENV=production`;
+
+        if (userDefinedPort) {
+            await updateLogs(`[INFO] Using PORT from environment variables: ${effectivePort}`);
+        } else {
+            await updateLogs(`[INFO] Using PORT from build settings: ${effectivePort}`);
+        }
 
         // Run container WITHOUT port publishing
         await updateLogs("=== STARTING CONTAINER ===");
-        const runCmd = `docker run -d --name ${project.slug} --restart unless-stopped --memory="512m" --cpus="1.0" ${portEnv} ${envFlags} ${imageTag}`;
+        const runCmd = `docker run -d --name ${project.slug} --restart unless-stopped --memory="512m" --cpus="1.0" ${nodeEnv} ${portEnv} ${envFlags} ${imageTag}`;
 
         try {
             await execPromise(runCmd, { timeout: 30000 });
@@ -380,7 +412,7 @@ async function runServerDeploy(project, deploymentId) {
 
         // Health check from nginx
         await updateLogs("=== HEALTH CHECK ===");
-        const healthResult = await healthCheckFromNginx(project.slug, project.port || 3000);
+        const healthResult = await healthCheckFromNginx(project.slug, effectivePort);
 
         if (!healthResult.reachable) {
             throw new Error(`Health check failed: ${healthResult.error}`);
@@ -388,9 +420,10 @@ async function runServerDeploy(project, deploymentId) {
 
         await updateLogs(`[OK] Container reachable (HTTP ${healthResult.statusCode})`);
 
-        // Generate nginx config
+        // Generate nginx config with effective port (from env vars or build settings)
         await updateLogs("=== CONFIGURING GATEWAY ===");
-        const configPath = await writeNginxConfig(project);
+        const projectWithEffectivePort = { ...project, port: effectivePort };
+        const configPath = await writeNginxConfig(projectWithEffectivePort);
         await updateLogs(`Config created: ${configPath}`);
 
         // Reload nginx with validation
