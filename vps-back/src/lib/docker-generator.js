@@ -47,9 +47,14 @@ function generateNodeBackendDockerfile(config) {
 
   // Add Prisma schema copy and generate if Prisma is detected
   let prismaCopy = "";
+  let prismaSetup = "";
   if (hasPrisma) {
     prismaCopy = "COPY prisma ./prisma\n";
-    prismaGenerateCmd = "RUN npx prisma generate";
+    // Install OpenSSL for Prisma compatibility on Alpine
+    prismaSetup = `# Install OpenSSL for Prisma
+RUN apk add --no-cache openssl
+RUN npx prisma generate
+`;
   }
 
   // Ensure server listens on 0.0.0.0
@@ -62,7 +67,7 @@ WORKDIR /app
 # Install dependencies
 ${copyFiles}
 ${prismaCopy}RUN ${installCmd}
-${prismaGenerateCmd ? prismaGenerateCmd + '\n' : ''}
+${prismaSetup}
 # Copy source
 COPY . .
 

@@ -330,6 +330,19 @@ async function runServerDeploy(project, deploymentId) {
         // Get environment variables
         const envVars = await prisma.envVar.findMany({ where: { projectId: project.id } });
 
+        // Log environment variables
+        await updateLogs("=== ENVIRONMENT VARIABLES ===");
+        if (envVars.length > 0) {
+            await updateLogs(`[INFO] Injecting ${envVars.length} environment variable(s):`);
+            for (const ev of envVars) {
+                // Mask sensitive values (show only first 4 chars)
+                const maskedValue = ev.value.length > 4 ? `${ev.value.substring(0, 4)}***` : '***';
+                await updateLogs(`  ${ev.key}=${maskedValue}`);
+            }
+        } else {
+            await updateLogs("[INFO] No environment variables defined");
+        }
+
         // Check if user has defined PORT in env vars (env vars take priority)
         const userDefinedPort = envVars.find(ev => ev.key === 'PORT');
         const effectivePort = userDefinedPort ? parseInt(userDefinedPort.value) : (project.port || 3000);
