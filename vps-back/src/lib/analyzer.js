@@ -85,7 +85,8 @@ async function analyzeWorkspace(basePath, relativePath = "") {
     startCommand: "",
     outputDir: "",
     port: 3000,
-    warnings: [] // Array to store detection warnings
+    warnings: [], // Array to store detection warnings
+    hasPrisma: false // Prisma detection flag
   };
 
   const files = await fs.promises.readdir(targetPath);
@@ -148,6 +149,16 @@ async function analyzeWorkspace(basePath, relativePath = "") {
 
     if (!config.outputDir && config.isStatic) {
         config.outputDir = "dist";
+    }
+
+    // Detect Prisma
+    const schemaPath = path.join(targetPath, "prisma", "schema.prisma");
+    if (fs.existsSync(schemaPath) || deps["@prisma/client"] || deps["prisma"]) {
+      config.hasPrisma = true;
+      config.warnings.push({
+        type: "PRISMA_DETECTED",
+        message: "Prisma detected - Prisma Client will be generated automatically during deployment"
+      });
     }
 
     // Auto-detect start command for backend projects

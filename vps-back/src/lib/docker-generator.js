@@ -1,11 +1,41 @@
 const fs = require("fs");
 const path = require("path");
 
+/**
+ * Detect if project uses Prisma
+ * @param {string} projectPath - Path to the project directory
+ * @returns {boolean} - True if Prisma is detected
+ */
+function detectPrisma(projectPath) {
+  try {
+    // Check for schema.prisma file
+    const schemaPath = path.join(projectPath, "prisma", "schema.prisma");
+    if (fs.existsSync(schemaPath)) {
+      return true;
+    }
+
+    // Check for @prisma/client in package.json
+    const packageJsonPath = path.join(projectPath, "package.json");
+    if (fs.existsSync(packageJsonPath)) {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+      const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+      if (deps["@prisma/client"] || deps["prisma"]) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
 function generateNodeBackendDockerfile(config) {
-  const { packageManager = "npm", port = 3000, startCommand = "npm start" } = config;
+  const { packageManager = "npm", port = 3000, startCommand = "npm start", hasPrisma = false } = config;
 
   let installCmd = "npm ci --omit=dev"; // default for npm
   let copyFiles = "COPY package*.json ./";
+  let prismaGenerateCmd = "";
 
   if (packageManager === "yarn") {
     installCmd = "yarn install --production --frozen-lockfile";
@@ -13,6 +43,13 @@ function generateNodeBackendDockerfile(config) {
   } else if (packageManager === "pnpm") {
     installCmd = "npm install -g pnpm && pnpm install --prod --frozen-lockfile";
     copyFiles = "COPY package.json pnpm-lock.yaml ./";
+  }
+
+  // Add Prisma schema copy and generate if Prisma is detected
+  let prismaCopy = "";
+  if (hasPrisma) {
+    prismaCopy = "COPY prisma ./prisma\n";
+    prismaGenerateCmd = "RUN npx prisma generate";
   }
 
   // Ensure server listens on 0.0.0.0
@@ -24,8 +61,8 @@ WORKDIR /app
 
 # Install dependencies
 ${copyFiles}
-RUN ${installCmd}
-
+${prismaCopy}RUN ${installCmd}
+${prismaGenerateCmd ? prismaGenerateCmd + '\n' : ''}
 # Copy source
 COPY . .
 
@@ -146,9 +183,10 @@ async function writeDockerfile(content, targetDir) {
   }
 }
 
-module.exports = { 
-    generateNodeBackendDockerfile, 
-    generatePythonBackendDockerfile, 
+module.exports = {
+    generateNodeBackendDockerfile,
+    generatePythonBackendDockerfile,
     generateFrontendDockerfile,
-    writeDockerfile 
+    writeDockerfile,
+    detectPrisma
 };

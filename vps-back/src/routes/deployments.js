@@ -7,7 +7,7 @@ const fs = require("fs");
 const util = require("util");
 const execPromise = util.promisify(exec);
 const { generateDockerCompose, writeDockerCompose } = require("../lib/docker-compose-generator");
-const { generateNodeBackendDockerfile, generatePythonBackendDockerfile, writeDockerfile } = require("../lib/docker-generator");
+const { generateNodeBackendDockerfile, generatePythonBackendDockerfile, writeDockerfile, detectPrisma } = require("../lib/docker-generator");
 const { writeNginxConfig, reloadNginx, healthCheckFromNginx } = require("../lib/nginx-config-generator");
 const { detectCaseSensitivityIssue, formatCaseSensitivityError } = require("../lib/case-sensitivity-checker");
 const { detectPythonFramework, buildPythonStartCommand, validatePythonStartCommand } = require("../lib/python-framework-detector");
@@ -218,10 +218,17 @@ async function runServerDeploy(project, deploymentId) {
                 startCommand = fixedCommand;
             }
 
+            // Detect Prisma in the project
+            const hasPrisma = detectPrisma(projectRoot);
+            if (hasPrisma) {
+                await updateLogs("[INFO] Prisma detected - will generate Prisma Client during build");
+            }
+
             const config = {
                 packageManager: project.packageManager || "npm",
                 startCommand: startCommand,
-                port: project.port || 3000
+                port: project.port || 3000,
+                hasPrisma: hasPrisma
             };
 
             let dockerfileContent;
