@@ -252,6 +252,14 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     const startDeploy = async () => {
         setLoading(true);
         try {
+            // Save environment variables first
+            await apiFetch(`/projects/${projectId}/env-vars/bulk`, {
+                method: "POST",
+                token: getToken(),
+                body: { envVars }
+            });
+
+            // Then start deployment
             const res = await apiFetch(`/deployments/${projectId}`, {
                 method: "POST",
                 token: getToken()

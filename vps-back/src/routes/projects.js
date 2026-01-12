@@ -460,6 +460,39 @@ router.get("/:id/env-vars", authRequired, async (req, res) => {
     }
 });
 
+// POST /api/projects/:id/env-vars/bulk - Bulk save env vars (for wizard)
+router.post("/:id/env-vars/bulk", authRequired, async (req, res) => {
+    const { envVars } = req.body; // Array of { key, value }
+    const projectId = req.params.id;
+
+    try {
+        // Verify project ownership
+        const project = await prisma.project.findUnique({ where: { id: projectId } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        // Delete all existing env vars for this project
+        await prisma.envVar.deleteMany({ where: { projectId } });
+
+        // Create new env vars
+        if (envVars && envVars.length > 0) {
+            await prisma.envVar.createMany({
+                data: envVars.map(ev => ({
+                    projectId,
+                    key: ev.key,
+                    value: ev.value
+                }))
+            });
+        }
+
+        res.json({ success: true, count: envVars?.length || 0 });
+    } catch (err) {
+        console.error("Bulk env var save failed:", err);
+        res.status(500).json({ error: "Failed to save env vars" });
+    }
+});
+
 // POST /api/projects/:id/env-vars
 router.post("/:id/env-vars", authRequired, async (req, res) => {
     const { key, value } = req.body;
