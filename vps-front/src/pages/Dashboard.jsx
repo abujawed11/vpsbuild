@@ -12,6 +12,7 @@ export default function Dashboard() {
     const [showCreateGroup, setShowCreateGroup] = useState(false);
     const [newGroupName, setNewGroupName] = useState("");
     const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+    const [deletingGroupId, setDeletingGroupId] = useState(null);
 
     useEffect(() => {
         const token = getToken();
@@ -74,12 +75,15 @@ export default function Dashboard() {
     
     const deleteGroup = async (groupId, groupName) => {
         if (!window.confirm(`Delete project "${groupName}"?`)) return;
+        setDeletingGroupId(groupId);
         try {
             await apiFetch(`/groups/${groupId}`, { method: "DELETE", token: getToken() });
             fetchData();
         } catch (e) {
             // Show user-friendly error message
             alert(e.message || "Failed to delete project");
+        } finally {
+            setDeletingGroupId(null);
         }
     };
 
@@ -172,20 +176,40 @@ export default function Dashboard() {
                 {groups.map(g => (
                     <div 
                         key={g.id} 
-                        onClick={() => nav(`/groups/${g.id}`)}
+                        onClick={() => !deletingGroupId && nav(`/groups/${g.id}`)}
                         style={{ 
-                            border: "1px solid #e0e0e0", borderRadius: 12, padding: 20, cursor: "pointer",
+                            border: "1px solid #e0e0e0", borderRadius: 12, padding: 20, 
+                            cursor: deletingGroupId === g.id ? "default" : "pointer",
                             background: "white", transition: "box-shadow 0.2s ease",
-                            boxShadow: "0 2px 5px rgba(0,0,0,0.05)"
+                            boxShadow: "0 2px 5px rgba(0,0,0,0.05)",
+                            position: "relative"
                         }}
-                        onMouseEnter={e => e.currentTarget.style.boxShadow = "0 5px 15px rgba(0,0,0,0.1)"}
-                        onMouseLeave={e => e.currentTarget.style.boxShadow = "0 2px 5px rgba(0,0,0,0.05)"}
+                        onMouseEnter={e => !deletingGroupId && (e.currentTarget.style.boxShadow = "0 5px 15px rgba(0,0,0,0.1)")}
+                        onMouseLeave={e => !deletingGroupId && (e.currentTarget.style.boxShadow = "0 2px 5px rgba(0,0,0,0.05)")}
                     >
+                        {deletingGroupId === g.id && (
+                            <div style={{
+                                position: "absolute",
+                                top: 0, left: 0, right: 0, bottom: 0,
+                                background: "rgba(255, 255, 255, 0.8)",
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                borderRadius: 12,
+                                zIndex: 20,
+                                gap: 10
+                            }}>
+                                <div className="spinner"></div>
+                                <span style={{ fontWeight: 600, color: "#c62828", fontSize: "0.9em" }}>Deleting...</span>
+                            </div>
+                        )}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                             <h3 style={{ margin: "0 0 10px 0", color: "#333" }}>{g.name}</h3>
                             <button 
                                 onClick={(e) => { e.stopPropagation(); deleteGroup(g.id, g.name); }}
-                                style={{ background: "none", border: "none", color: "#999", cursor: "pointer", padding: 5 }}
+                                disabled={deletingGroupId === g.id}
+                                style={{ background: "none", border: "none", color: "#999", cursor: deletingGroupId === g.id ? "not-allowed" : "pointer", padding: 5 }}
                             >✕</button>
                         </div>
                         <div style={{ color: "#666", fontSize: "0.9em" }}>
