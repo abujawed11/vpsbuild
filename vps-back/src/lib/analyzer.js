@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { detectPort } = require("./port-detector");
 
 /**
  * Detect if a command uses development tools
@@ -222,6 +223,9 @@ async function analyzeWorkspace(basePath, relativePath = "") {
       }
     }
 
+    // Auto-detect port based on start command and framework
+    config.port = detectPort(config);
+
     return config;
   }
 
@@ -230,7 +234,6 @@ async function analyzeWorkspace(basePath, relativePath = "") {
       config.runtime = "python";
       config.packageManager = "pip";
       config.framework = "python-generic"; // default
-      config.port = 5000;
       
       // Install Command
       let requirementsContent = "";
@@ -260,12 +263,10 @@ async function analyzeWorkspace(basePath, relativePath = "") {
 
       if (isDjango) {
           config.framework = "django";
-          config.port = 8000;
-          config.startCommand = "python manage.py runserver 0.0.0.0:8000"; 
+          config.startCommand = "python manage.py runserver 0.0.0.0:8000";
           // Note: In prod, users should ideally use gunicorn, but this works out of box
       } else if (isFastApi) {
           config.framework = "fastapi";
-          config.port = 8000;
           // Guess entry point: main:app or app:app
           if (hasFile("main.py")) config.startCommand = "uvicorn main:app --host 0.0.0.0 --port 8000";
           else config.startCommand = "uvicorn app:app --host 0.0.0.0 --port 8000";
@@ -276,6 +277,9 @@ async function analyzeWorkspace(basePath, relativePath = "") {
           else if (hasFile("main.py")) config.startCommand = "python main.py";
           else config.startCommand = "python app.py";
       }
+
+      // Auto-detect port based on start command and framework
+      config.port = detectPort(config);
 
       return config;
   }

@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 
+// Reserved environment variable keys that are system-managed
+const RESERVED_KEYS = ['PORT', 'NODE_ENV', 'HOST'];
+
 export default function EditEnvModal({ projectId, projectName, onClose, onSuccess }) {
     const [envVars, setEnvVars] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -19,7 +22,9 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
             const vars = await apiFetch(`/projects/${projectId}/env-vars`, {
                 token: getToken()
             });
-            setEnvVars(vars.map(v => ({ key: v.key, value: v.value, id: v.id })));
+            // Filter out reserved system variables (they're managed automatically)
+            const userVars = vars.filter(v => !RESERVED_KEYS.includes(v.key.toUpperCase()));
+            setEnvVars(userVars.map(v => ({ key: v.key, value: v.value, id: v.id })));
         } catch (e) {
             setError(e.message);
         } finally {
@@ -48,6 +53,17 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
         const validVars = envVars.filter(v => v.key.trim() && v.value.trim());
         if (validVars.length === 0 && envVars.length > 0) {
             setError("Please fill in all key-value pairs or remove empty ones");
+            return;
+        }
+
+        // Check for reserved keys
+        const hasReservedKey = validVars.some(v =>
+            RESERVED_KEYS.includes(v.key.trim().toUpperCase())
+        );
+
+        if (hasReservedKey) {
+            const reservedFound = validVars.find(v => RESERVED_KEYS.includes(v.key.trim().toUpperCase()));
+            setError(`"${reservedFound.key}" is a reserved system variable (PORT, NODE_ENV, HOST) and cannot be set manually.`);
             return;
         }
 
@@ -128,6 +144,9 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
                     <p style={{ margin: "5px 0 0 0", fontSize: "0.85em", color: "#888" }}>
                         For server deployments, changes will be applied immediately by restarting the container.
                         For static sites, you'll need to redeploy for changes to take effect.
+                    </p>
+                    <p style={{ margin: "5px 0 0 0", fontSize: "0.85em", color: "#888" }}>
+                        <strong>Note:</strong> PORT, NODE_ENV, and HOST are managed automatically and cannot be edited here.
                     </p>
                 </div>
 

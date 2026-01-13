@@ -2,9 +2,13 @@ import { useState, useEffect } from "react";
 import { getToken } from "../lib/auth";
 import { apiFetch } from "../lib/api";
 
+// Reserved environment variable keys that are system-managed
+const RESERVED_KEYS = ['PORT', 'NODE_ENV', 'HOST'];
+
 export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
+    const [envError, setEnvError] = useState("");
 
     const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
     const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
@@ -41,8 +45,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
         outputDir: "dist",
         spaRouting: true,
         // Server-specific settings
-        startCommand: "",
-        port: 3000
+        startCommand: ""
     });
 
     // Step 5: Env Vars
@@ -206,8 +209,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 setBuildSettings({
                     packageManager: res.project.packageManager || "npm",
                     startCommand: res.project.startCommand || "npm start",
-                    buildCommand: res.project.buildCommand || "",
-                    port: res.project.port || 3000
+                    buildCommand: res.project.buildCommand || ""
                 });
             } else {
                 // Static site settings
@@ -230,8 +232,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                 ? {
                     packageManager: buildSettings.packageManager,
                     startCommand: buildSettings.startCommand,
-                    buildCommand: buildSettings.buildCommand,
-                    port: parseInt(buildSettings.port)
+                    buildCommand: buildSettings.buildCommand
                 }
                 : {
                     packageManager: buildSettings.packageManager,
@@ -250,6 +251,18 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     };
 
     const startDeploy = async () => {
+        // Validate env vars for reserved keys before deploying
+        const hasReservedKey = envVars.some(v =>
+            RESERVED_KEYS.includes(v.key.trim().toUpperCase())
+        );
+
+        if (hasReservedKey) {
+            const reservedFound = envVars.find(v => RESERVED_KEYS.includes(v.key.trim().toUpperCase()));
+            setEnvError(`Cannot deploy: "${reservedFound.key}" is a reserved system variable. Please remove PORT, NODE_ENV, and HOST from your environment variables.`);
+            return;
+        }
+
+        setEnvError("");
         setLoading(true);
         try {
             // Save environment variables first
@@ -297,6 +310,14 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
     const addEnvVar = () => {
         if (!newEnv.key) return;
+
+        // Check for reserved keys (case-insensitive)
+        if (RESERVED_KEYS.includes(newEnv.key.trim().toUpperCase())) {
+            setEnvError(`"${newEnv.key}" is a reserved system variable (PORT, NODE_ENV, HOST) and cannot be set manually.`);
+            return;
+        }
+
+        setEnvError("");
         setEnvVars([...envVars, newEnv]);
         setNewEnv({ key: "", value: "" });
     };
@@ -333,10 +354,20 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
             });
 
             if (newVars.length > 0) {
+                // Filter out reserved keys and existing keys
                 const existingKeys = new Set(envVars.map(ev => ev.key));
-                const uniqueNewVars = newVars.filter(ev => !existingKeys.has(ev.key));
+                const reservedFiltered = newVars.filter(ev => !RESERVED_KEYS.includes(ev.key.trim().toUpperCase()));
+                const uniqueNewVars = reservedFiltered.filter(ev => !existingKeys.has(ev.key));
+
+                const reservedCount = newVars.length - reservedFiltered.length;
+
                 setEnvVars([...envVars, ...uniqueNewVars]);
-                alert(`Imported ${uniqueNewVars.length} variables.`);
+
+                let message = `Imported ${uniqueNewVars.length} variables.`;
+                if (reservedCount > 0) {
+                    message += ` (${reservedCount} reserved variables like PORT, NODE_ENV, HOST were skipped)`;
+                }
+                alert(message);
             }
         };
         reader.readAsText(file);
@@ -371,11 +402,25 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
         });
 
         if (newVars.length > 0) {
+            // Filter out reserved keys and existing keys
             const existingKeys = new Set(envVars.map(ev => ev.key));
-            const uniqueNewVars = newVars.filter(ev => !existingKeys.has(ev.key));
+            const reservedFiltered = newVars.filter(ev => !RESERVED_KEYS.includes(ev.key.trim().toUpperCase()));
+            const uniqueNewVars = reservedFiltered.filter(ev => !existingKeys.has(ev.key));
+
+            const reservedCount = newVars.length - reservedFiltered.length;
+            const duplicateCount = reservedFiltered.length - uniqueNewVars.length;
+
             setEnvVars([...envVars, ...uniqueNewVars]);
             setPasteText("");
-            alert(`Added ${uniqueNewVars.length} variables (${newVars.length - uniqueNewVars.length} duplicates skipped).`);
+
+            let message = `Added ${uniqueNewVars.length} variables.`;
+            if (duplicateCount > 0) {
+                message += ` (${duplicateCount} duplicates skipped)`;
+            }
+            if (reservedCount > 0) {
+                message += ` ${duplicateCount > 0 ? '&' : '('} ${reservedCount} reserved variables like PORT, NODE_ENV, HOST were skipped${duplicateCount === 0 ? ')' : ''}`;
+            }
+            alert(message);
         } else {
             alert("No valid environment variables found in pasted text.");
         }
@@ -686,18 +731,8 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                                         placeholder="e.g. npm start, python app.py"
                                         style={inputStyle}
                                     />
-                                </div>
-                                <div>
-                                    <label style={labelStyle}>Port (Internal)</label>
-                                    <input
-                                        type="number"
-                                        value={buildSettings.port}
-                                        onChange={e => setBuildSettings({...buildSettings, port: e.target.value})}
-                                        placeholder="3000"
-                                        style={inputStyle}
-                                    />
                                     <small style={{ color: "#666", fontSize: "0.85em", display: "block", marginTop: 5 }}>
-                                        Port your app listens on (detected from code). Can be overridden by PORT env var in next step.
+                                        Port will be automatically configured based on your framework.
                                     </small>
                                 </div>
                             </>
@@ -746,10 +781,17 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     <h3 style={stepTitle}>Step 6: Environment Variables</h3>
                     <p style={stepDesc}>
                         {siteType === "server"
-                            ? "Add runtime environment variables. You can override PORT here if needed."
+                            ? "Add runtime environment variables. (Note: PORT, NODE_ENV, HOST are managed automatically)"
                             : "Add keys like VITE_API_URL. (Build-time only)"
                         }
                     </p>
+
+                    {/* Error Message */}
+                    {envError && (
+                        <div style={{ marginBottom: 20, padding: 15, background: "#ffebee", color: "#c62828", borderRadius: 8, border: "1px solid #ef9a9a" }}>
+                            ⚠️ {envError}
+                        </div>
+                    )}
 
                     {/* Tab Switcher */}
                     <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>

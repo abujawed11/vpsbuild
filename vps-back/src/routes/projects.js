@@ -336,7 +336,7 @@ router.post("/:id/roots", authRequired, async (req, res) => {
 // PATCH /api/projects/:id
 router.patch("/:id", authRequired, async (req, res) => {
     const { id } = req.params;
-    const { name, slug, rootDir, buildCommand, outputDir, packageManager, startCommand, port } = req.body;
+    const { name, slug, rootDir, buildCommand, outputDir, packageManager, startCommand } = req.body;
 
     try {
         const project = await prisma.project.findUnique({ where: { id } });
@@ -344,9 +344,29 @@ router.patch("/:id", authRequired, async (req, res) => {
             return res.status(404).json({ error: "Project not found" });
         }
 
+        // Auto-detect port from start command if provided
+        let detectedPort = project.port; // Keep existing port by default
+        if (startCommand) {
+            const { detectPort } = require("../lib/port-detector");
+            detectedPort = detectPort({
+                startCommand,
+                runtime: project.runtime,
+                framework: project.framework
+            });
+        }
+
         const updated = await prisma.project.update({
             where: { id },
-            data: { name, slug, rootDir, buildCommand, outputDir, packageManager, startCommand, port }
+            data: {
+                name,
+                slug,
+                rootDir,
+                buildCommand,
+                outputDir,
+                packageManager,
+                startCommand,
+                port: detectedPort
+            }
         });
 
         res.json({ success: true, project: updated });
