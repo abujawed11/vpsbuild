@@ -520,6 +520,87 @@ router.delete("/:id/env-vars/:key", authRequired, async (req, res) => {
     }
 });
 
+// POST /api/projects/:id/env-vars/hot-reload
+// Update env vars and restart container (hot reload)
+router.post("/:id/env-vars/hot-reload", authRequired, async (req, res) => {
+    const { envVars } = req.body; // Array of { key, value }
+    const projectId = req.params.id;
+
+    try {
+        // Verify project ownership
+        const project = await prisma.project.findUnique({ where: { id: projectId } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        // Check if project is deployed with a container
+        const isServerDeployment = project.deployType === "BACKEND" || project.deployType === "FULLSTACK";
+
+        if (!isServerDeployment) {
+            // For static sites, just update env vars (they're used during build time only)
+            await prisma.envVar.deleteMany({ where: { projectId } });
+            if (envVars && envVars.length > 0) {
+                await prisma.envVar.createMany({
+                    data: envVars.map(ev => ({ projectId, key: ev.key, value: ev.value }))
+                });
+            }
+            return res.json({ success: true, message: "Environment variables updated. Redeploy to apply changes." });
+        }
+
+        // For server deployments, update env vars and restart container
+        await prisma.envVar.deleteMany({ where: { projectId } });
+        if (envVars && envVars.length > 0) {
+            await prisma.envVar.createMany({
+                data: envVars.map(ev => ({ projectId, key: ev.key, value: ev.value }))
+            });
+        }
+
+        // Check if container exists
+        const { execSync } = require("child_process");
+        try {
+            execSync(`docker inspect ${project.slug}`, { stdio: 'ignore' });
+        } catch {
+            // Container doesn't exist, just update env vars
+            return res.json({ success: true, message: "Environment variables updated. Deploy to create container." });
+        }
+
+        // Get updated env vars from database
+        const updatedEnvVars = await prisma.envVar.findMany({ where: { projectId } });
+
+        // Build env flags for docker run
+        const envFlags = updatedEnvVars.map(ev => `-e ${ev.key}="${ev.value}"`).join(" ");
+
+        // Get original container configuration
+        const imageTag = project.slug;
+        const effectivePort = project.port || 3000;
+        const nodeEnv = `-e NODE_ENV=production`;
+        const portEnv = `-e PORT=${effectivePort}`;
+
+        // Stop and remove old container
+        try {
+            execSync(`docker stop ${project.slug}`, { stdio: 'ignore' });
+        } catch {}
+        try {
+            execSync(`docker rm ${project.slug}`, { stdio: 'ignore' });
+        } catch {}
+
+        // Start new container with updated env vars
+        const runCmd = `docker run -d --name ${project.slug} --restart unless-stopped --memory="512m" --cpus="1.0" ${nodeEnv} ${portEnv} ${envFlags} ${imageTag}`;
+        execSync(runCmd);
+
+        // Connect to gateway network
+        try {
+            const gatewayNetwork = process.env.GATEWAY_NETWORK || "vpsbuilds_default";
+            execSync(`docker network connect ${gatewayNetwork} ${project.slug}`, { stdio: 'ignore' });
+        } catch {}
+
+        res.json({ success: true, message: "Environment variables updated and container restarted successfully." });
+    } catch (err) {
+        console.error("Hot reload error:", err);
+        res.status(500).json({ error: err.message || "Failed to hot reload environment variables" });
+    }
+});
+
 // POST /api/projects/analyze
 router.post("/analyze", authRequired, async (req, res) => {
   const { projectId } = req.body;

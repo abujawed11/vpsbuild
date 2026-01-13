@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 import DeploymentWizard from "../components/DeploymentWizard";
+import EditEnvModal from "../components/EditEnvModal";
 
 export default function GroupView() {
     const { groupId } = useParams();
@@ -12,6 +13,8 @@ export default function GroupView() {
     const [showWizard, setShowWizard] = useState(false);
     const [err, setErr] = useState("");
     const [deletingProjectId, setDeletingProjectId] = useState(null);
+    const [openMenuId, setOpenMenuId] = useState(null);
+    const [editingEnvProjectId, setEditingEnvProjectId] = useState(null);
 
     const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
     const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
@@ -24,6 +27,15 @@ export default function GroupView() {
         }
         fetchGroup();
     }, [groupId, nav]);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = () => setOpenMenuId(null);
+        if (openMenuId) {
+            document.addEventListener("click", handleClickOutside);
+            return () => document.removeEventListener("click", handleClickOutside);
+        }
+    }, [openMenuId]);
 
     const fetchGroup = async () => {
         try {
@@ -151,21 +163,84 @@ export default function GroupView() {
                                         }}>
                                             {latestStatus}
                                         </span>
-                                        <div style={{ display: "flex", gap: 8 }}>
+                                        <div style={{ position: "relative" }}>
                                             <button
-                                                onClick={() => deleteProject(p.id, p.name)}
-                                                disabled={deletingProjectId === p.id}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setOpenMenuId(openMenuId === p.id ? null : p.id);
+                                                }}
                                                 style={{
-                                                    fontSize: "0.8em", padding: "4px 8px",
-                                                    background: deletingProjectId === p.id ? "#e0e0e0" : "#ffebee",
-                                                    color: deletingProjectId === p.id ? "#999" : "#c62828",
-                                                    border: `1px solid ${deletingProjectId === p.id ? "#bdbdbd" : "#ef9a9a"}`,
-                                                    cursor: deletingProjectId === p.id ? "not-allowed" : "pointer",
-                                                    opacity: deletingProjectId === p.id ? 0.7 : 1
+                                                    background: "none",
+                                                    border: "1px solid #ddd",
+                                                    borderRadius: 4,
+                                                    cursor: "pointer",
+                                                    padding: "4px 8px",
+                                                    fontSize: "1.2em",
+                                                    color: "#666",
+                                                    lineHeight: 1
                                                 }}
                                             >
-                                                {deletingProjectId === p.id ? "Deleting..." : "Delete"}
+                                                ⋮
                                             </button>
+                                            {openMenuId === p.id && (
+                                                <div style={{
+                                                    position: "absolute",
+                                                    right: 0,
+                                                    top: "100%",
+                                                    marginTop: 4,
+                                                    background: "white",
+                                                    border: "1px solid #ddd",
+                                                    borderRadius: 6,
+                                                    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                                                    minWidth: 180,
+                                                    zIndex: 1000
+                                                }}>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setOpenMenuId(null);
+                                                            setEditingEnvProjectId(p.id);
+                                                        }}
+                                                        style={{
+                                                            width: "100%",
+                                                            textAlign: "left",
+                                                            padding: "10px 15px",
+                                                            background: "none",
+                                                            border: "none",
+                                                            cursor: "pointer",
+                                                            fontSize: "0.9em",
+                                                            borderBottom: "1px solid #eee"
+                                                        }}
+                                                        onMouseEnter={e => e.target.style.background = "#f5f5f5"}
+                                                        onMouseLeave={e => e.target.style.background = "none"}
+                                                    >
+                                                        Edit Environment Variables
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setOpenMenuId(null);
+                                                            deleteProject(p.id, p.name);
+                                                        }}
+                                                        disabled={deletingProjectId === p.id}
+                                                        style={{
+                                                            width: "100%",
+                                                            textAlign: "left",
+                                                            padding: "10px 15px",
+                                                            background: "none",
+                                                            border: "none",
+                                                            cursor: deletingProjectId === p.id ? "not-allowed" : "pointer",
+                                                            fontSize: "0.9em",
+                                                            color: deletingProjectId === p.id ? "#999" : "#c62828",
+                                                            opacity: deletingProjectId === p.id ? 0.7 : 1
+                                                        }}
+                                                        onMouseEnter={e => !deletingProjectId && (e.target.style.background = "#ffebee")}
+                                                        onMouseLeave={e => e.target.style.background = "none"}
+                                                    >
+                                                        {deletingProjectId === p.id ? "Deleting..." : "Delete"}
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -173,6 +248,17 @@ export default function GroupView() {
                         })
                     )}
                 </div>
+            )}
+
+            {editingEnvProjectId && (
+                <EditEnvModal
+                    projectId={editingEnvProjectId}
+                    projectName={projects.find(p => p.id === editingEnvProjectId)?.name || ""}
+                    onClose={() => setEditingEnvProjectId(null)}
+                    onSuccess={() => {
+                        fetchGroup();
+                    }}
+                />
             )}
         </div>
     );
