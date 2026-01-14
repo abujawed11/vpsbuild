@@ -62,9 +62,10 @@ RUN npx prisma generate
   // Ensure server listens on 0.0.0.0
   const wrappedStart = `export HOST=0.0.0.0 && ${startCommand}`;
 
-  // If Prisma is detected, run migrations before starting
+  // If Prisma is detected, try to run migrations and regenerate client before starting
+  // Use || true to continue even if migrations fail (DB might be unreachable)
   const startupCmd = hasPrisma
-    ? `npx prisma migrate deploy && ${wrappedStart}`
+    ? `(npx prisma migrate deploy && npx prisma generate) || echo "Warning: Prisma migrations/generate failed, starting app anyway..."; ${wrappedStart}`
     : wrappedStart;
 
   return `FROM node:18-alpine
