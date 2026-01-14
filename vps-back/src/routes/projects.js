@@ -919,4 +919,246 @@ router.post("/import", authRequired, async (req, res) => {
   }
 });
 
+// ===== FILE MANAGEMENT ENDPOINTS =====
+
+// GET /api/projects/:id/files - List files and folders in workspace
+router.get("/:id/files", authRequired, async (req, res) => {
+  const { id } = req.params;
+  const { path: relativePath = "" } = req.query;
+
+  try {
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project || project.userId !== req.user.id) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (!project.workspacePath || !fsSync.existsSync(project.workspacePath)) {
+      return res.status(400).json({ error: "Workspace not found" });
+    }
+
+    // Security check: normalize path and prevent directory traversal
+    const safeRelative = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+    const fullPath = path.join(project.workspacePath, safeRelative);
+
+    if (!fullPath.startsWith(project.workspacePath)) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+
+    if (!fsSync.existsSync(fullPath)) {
+      return res.status(404).json({ error: "Path not found" });
+    }
+
+    const stats = await fs.stat(fullPath);
+
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ error: "Path is not a directory" });
+    }
+
+    const entries = await fs.readdir(fullPath, { withFileTypes: true });
+    const items = [];
+
+    for (const entry of entries) {
+      const itemPath = path.join(fullPath, entry.name);
+      const itemStats = await fs.stat(itemPath);
+
+      items.push({
+        name: entry.name,
+        path: path.join(safeRelative, entry.name).replace(/\\/g, "/"),
+        type: entry.isDirectory() ? "folder" : "file",
+        size: entry.isFile() ? itemStats.size : null,
+        modified: itemStats.mtime
+      });
+    }
+
+    // Sort: folders first, then files, alphabetically
+    items.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    res.json({
+      items,
+      currentPath: safeRelative.replace(/\\/g, "/") || "/"
+    });
+  } catch (err) {
+    console.error("Failed to list files:", err);
+    res.status(500).json({ error: "Failed to list files" });
+  }
+});
+
+// Configure multer for file uploads
+const fileUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      // Destination will be set dynamically in the route
+      cb(null, req.uploadDir);
+    },
+    filename: (req, file, cb) => {
+      cb(null, file.originalname);
+    }
+  }),
+  limits: {
+    fileSize: 100 * 1024 * 1024 // 100MB limit per file
+  }
+});
+
+// POST /api/projects/:id/files/upload - Upload files to workspace
+router.post("/:id/files/upload", authRequired, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project || project.userId !== req.user.id) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (!project.workspacePath || !fsSync.existsSync(project.workspacePath)) {
+      return res.status(400).json({ error: "Workspace not found" });
+    }
+
+    // Get target path from query or body
+    const relativePath = req.query.path || req.body.path || "";
+    const safeRelative = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+    const uploadDir = path.join(project.workspacePath, safeRelative);
+
+    if (!uploadDir.startsWith(project.workspacePath)) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+
+    // Ensure directory exists
+    await fs.mkdir(uploadDir, { recursive: true });
+    req.uploadDir = uploadDir;
+
+    // Use multer middleware
+    fileUpload.array("files", 10)(req, res, async (err) => {
+      if (err) {
+        console.error("Upload error:", err);
+        return res.status(400).json({ error: err.message });
+      }
+
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      const uploadedFiles = req.files.map(f => ({
+        name: f.filename,
+        size: f.size,
+        path: path.join(safeRelative, f.filename).replace(/\\/g, "/")
+      }));
+
+      res.json({
+        success: true,
+        files: uploadedFiles,
+        message: `Uploaded ${uploadedFiles.length} file(s)`
+      });
+    });
+  } catch (err) {
+    console.error("Failed to upload files:", err);
+    res.status(500).json({ error: "Failed to upload files" });
+  }
+});
+
+// POST /api/projects/:id/files/mkdir - Create new folder
+router.post("/:id/files/mkdir", authRequired, async (req, res) => {
+  const { id } = req.params;
+  const { path: relativePath, name } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ error: "Folder name is required" });
+  }
+
+  // Validate folder name
+  if (name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+    return res.status(400).json({ error: "Invalid folder name" });
+  }
+
+  try {
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project || project.userId !== req.user.id) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (!project.workspacePath || !fsSync.existsSync(project.workspacePath)) {
+      return res.status(400).json({ error: "Workspace not found" });
+    }
+
+    const safeRelative = path.normalize(relativePath || "").replace(/^(\.\.(\/|\\|$))+/, "");
+    const parentDir = path.join(project.workspacePath, safeRelative);
+    const newFolderPath = path.join(parentDir, name);
+
+    if (!newFolderPath.startsWith(project.workspacePath)) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+
+    if (fsSync.existsSync(newFolderPath)) {
+      return res.status(400).json({ error: "Folder already exists" });
+    }
+
+    await fs.mkdir(newFolderPath, { recursive: true });
+
+    res.json({
+      success: true,
+      folder: {
+        name,
+        path: path.join(safeRelative, name).replace(/\\/g, "/"),
+        type: "folder"
+      }
+    });
+  } catch (err) {
+    console.error("Failed to create folder:", err);
+    res.status(500).json({ error: "Failed to create folder" });
+  }
+});
+
+// DELETE /api/projects/:id/files - Delete file or folder
+router.delete("/:id/files", authRequired, async (req, res) => {
+  const { id } = req.params;
+  const { path: relativePath } = req.query;
+
+  if (!relativePath) {
+    return res.status(400).json({ error: "Path is required" });
+  }
+
+  try {
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project || project.userId !== req.user.id) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (!project.workspacePath || !fsSync.existsSync(project.workspacePath)) {
+      return res.status(400).json({ error: "Workspace not found" });
+    }
+
+    const safeRelative = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+    const targetPath = path.join(project.workspacePath, safeRelative);
+
+    if (!targetPath.startsWith(project.workspacePath)) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+
+    // Prevent deleting entire workspace
+    if (targetPath === project.workspacePath) {
+      return res.status(400).json({ error: "Cannot delete workspace root" });
+    }
+
+    if (!fsSync.existsSync(targetPath)) {
+      return res.status(404).json({ error: "File or folder not found" });
+    }
+
+    const stats = await fs.stat(targetPath);
+    const itemType = stats.isDirectory() ? "folder" : "file";
+
+    await fs.rm(targetPath, { recursive: true, force: true });
+
+    res.json({
+      success: true,
+      message: `${itemType} deleted successfully`,
+      path: safeRelative.replace(/\\/g, "/")
+    });
+  } catch (err) {
+    console.error("Failed to delete:", err);
+    res.status(500).json({ error: "Failed to delete file or folder" });
+  }
+});
+
 module.exports = router;

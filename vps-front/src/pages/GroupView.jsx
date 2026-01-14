@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 import DeploymentWizard from "../components/DeploymentWizard";
 import EditEnvModal from "../components/EditEnvModal";
+import FileManagerModal from "../components/FileManagerModal";
 
 export default function GroupView() {
     const { groupId } = useParams();
@@ -15,6 +16,8 @@ export default function GroupView() {
     const [deletingProjectId, setDeletingProjectId] = useState(null);
     const [openMenuId, setOpenMenuId] = useState(null);
     const [editingEnvProjectId, setEditingEnvProjectId] = useState(null);
+    const [managingFilesProjectId, setManagingFilesProjectId] = useState(null);
+    const [redeployingProjectId, setRedeployingProjectId] = useState(null);
 
     const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
     const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
@@ -78,6 +81,33 @@ export default function GroupView() {
             alert(`Failed to delete project: ${e.message}`);
         } finally {
             setDeletingProjectId(null);
+        }
+    };
+
+    // Redeploy Project
+    const redeployProject = async (projectId, projectName, hasGitRepo) => {
+        const message = hasGitRepo
+            ? `Redeploy "${projectName}"?\n\nThis will pull the latest code from GitHub and redeploy your project.`
+            : `Redeploy "${projectName}"?\n\nThis will redeploy your project with the current workspace files.`;
+
+        const confirmed = window.confirm(message);
+
+        if (!confirmed) return;
+
+        setRedeployingProjectId(projectId);
+
+        try {
+            const result = await apiFetch(`/deployments/${projectId}/redeploy`, {
+                method: "POST",
+                token: getToken()
+            });
+
+            alert(result.message || "Redeployment started successfully! Check the project status for updates.");
+            fetchGroup();
+        } catch (e) {
+            alert(`Failed to start redeployment: ${e.message}`);
+        } finally {
+            setRedeployingProjectId(null);
         }
     };
 
@@ -223,6 +253,27 @@ export default function GroupView() {
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             setOpenMenuId(null);
+                                                            setManagingFilesProjectId(p.id);
+                                                        }}
+                                                        style={{
+                                                            width: "100%",
+                                                            textAlign: "left",
+                                                            padding: "10px 15px",
+                                                            background: "none",
+                                                            border: "none",
+                                                            cursor: "pointer",
+                                                            fontSize: "0.9em",
+                                                            borderBottom: "1px solid #eee"
+                                                        }}
+                                                        onMouseEnter={e => e.target.style.background = "#f5f5f5"}
+                                                        onMouseLeave={e => e.target.style.background = "none"}
+                                                    >
+                                                        📂 Manage Files
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setOpenMenuId(null);
                                                             setEditingEnvProjectId(p.id);
                                                         }}
                                                         style={{
@@ -238,7 +289,31 @@ export default function GroupView() {
                                                         onMouseEnter={e => e.target.style.background = "#f5f5f5"}
                                                         onMouseLeave={e => e.target.style.background = "none"}
                                                     >
-                                                        Edit Environment Variables
+                                                        ⚙️ Edit Environment Variables
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setOpenMenuId(null);
+                                                            redeployProject(p.id, p.name, !!p.repoFullName);
+                                                        }}
+                                                        disabled={redeployingProjectId === p.id}
+                                                        style={{
+                                                            width: "100%",
+                                                            textAlign: "left",
+                                                            padding: "10px 15px",
+                                                            background: "none",
+                                                            border: "none",
+                                                            cursor: redeployingProjectId === p.id ? "not-allowed" : "pointer",
+                                                            fontSize: "0.9em",
+                                                            borderBottom: "1px solid #eee",
+                                                            color: redeployingProjectId === p.id ? "#999" : "#2196F3",
+                                                            opacity: redeployingProjectId === p.id ? 0.7 : 1
+                                                        }}
+                                                        onMouseEnter={e => !redeployingProjectId && (e.target.style.background = "#e3f2fd")}
+                                                        onMouseLeave={e => e.target.style.background = "none"}
+                                                    >
+                                                        {redeployingProjectId === p.id ? "🔄 Redeploying..." : "🚀 Redeploy"}
                                                     </button>
                                                     <button
                                                         onClick={(e) => {
@@ -261,7 +336,7 @@ export default function GroupView() {
                                                         onMouseEnter={e => !deletingProjectId && (e.target.style.background = "#ffebee")}
                                                         onMouseLeave={e => e.target.style.background = "none"}
                                                     >
-                                                        {deletingProjectId === p.id ? "Deleting..." : "Delete"}
+                                                        {deletingProjectId === p.id ? "🗑️ Deleting..." : "🗑️ Delete"}
                                                     </button>
                                                 </div>
                                             )}
@@ -282,6 +357,14 @@ export default function GroupView() {
                     onSuccess={() => {
                         fetchGroup();
                     }}
+                />
+            )}
+
+            {managingFilesProjectId && (
+                <FileManagerModal
+                    projectId={managingFilesProjectId}
+                    projectName={projects.find(p => p.id === managingFilesProjectId)?.name || ""}
+                    onClose={() => setManagingFilesProjectId(null)}
                 />
             )}
         </div>

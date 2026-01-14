@@ -6,6 +6,7 @@ const path = require("path");
 const fs = require("fs");
 const util = require("util");
 const execPromise = util.promisify(exec);
+const { cloneRepo } = require("../lib/git");
 const { generateDockerCompose, writeDockerCompose } = require("../lib/docker-compose-generator");
 const { generateNodeBackendDockerfile, generatePythonBackendDockerfile, writeDockerfile, detectPrisma } = require("../lib/docker-generator");
 const { writeNginxConfig, reloadNginx, healthCheckFromNginx } = require("../lib/nginx-config-generator");
@@ -78,6 +79,94 @@ router.get("/status/:id", authRequired, async (req, res) => {
         res.json(deployment);
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch status" });
+    }
+});
+
+// POST /api/deployments/:projectId/redeploy - Redeploy project (pull latest code and deploy)
+router.post("/:projectId/redeploy", authRequired, async (req, res) => {
+    const { projectId } = req.params;
+
+    try {
+        const project = await prisma.project.findUnique({
+            where: { id: projectId },
+            include: { envVars: true }
+        });
+
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        if (!project.slug) {
+            return res.status(400).json({ error: "Project slug is required for deployment" });
+        }
+
+        // If project is from GitHub, pull latest code
+        if (project.repoFullName && project.branch) {
+            console.log(`[Redeploy] Pulling latest code for ${project.name}...`);
+
+            try {
+                // Get GitHub access token
+                const githubAccount = await prisma.githubAccount.findUnique({
+                    where: { userId: req.user.id }
+                });
+
+                if (!githubAccount) {
+                    return res.status(400).json({
+                        error: "GitHub account not connected. Please reconnect your GitHub account."
+                    });
+                }
+
+                // Re-clone the repository (cloneRepo removes existing dir and clones fresh)
+                if (project.workspacePath) {
+                    await cloneRepo(
+                        project.repoFullName,
+                        project.branch,
+                        githubAccount.accessToken,
+                        project.workspacePath
+                    );
+
+                    console.log(`[Redeploy] Successfully pulled latest code from ${project.repoFullName}`);
+                } else {
+                    return res.status(400).json({
+                        error: "Workspace path not found. Please redeploy from the beginning."
+                    });
+                }
+            } catch (gitErr) {
+                console.error("[Redeploy] Failed to pull latest code:", gitErr);
+                return res.status(500).json({
+                    error: "Failed to pull latest code from GitHub. " + gitErr.message
+                });
+            }
+        } else {
+            console.log(`[Redeploy] Project is not from GitHub, using existing workspace files`);
+        }
+
+        // Create Deployment record
+        const deployment = await prisma.deployment.create({
+            data: {
+                projectId: project.id,
+                status: "QUEUED",
+                logs: "Redeployment queued..."
+            }
+        });
+
+        // Trigger build process (async) - route based on deploy type
+        if (project.deployType === "BACKEND") {
+            runServerDeploy(project, deployment.id).catch(console.error);
+        } else {
+            runBuild(project, deployment.id).catch(console.error);
+        }
+
+        res.json({
+            success: true,
+            deploymentId: deployment.id,
+            message: project.repoFullName
+                ? "Pulled latest code and started redeployment"
+                : "Started redeployment with existing files"
+        });
+    } catch (err) {
+        console.error("[Redeploy] Error:", err);
+        res.status(500).json({ error: "Failed to start redeployment" });
     }
 });
 
