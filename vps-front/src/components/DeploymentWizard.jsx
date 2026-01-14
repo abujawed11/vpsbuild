@@ -782,7 +782,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     <p style={stepDesc}>
                         {siteType === "server"
                             ? "Add runtime environment variables. (Note: PORT, NODE_ENV, HOST are managed automatically)"
-                            : "Add keys like VITE_API_URL. (Build-time only)"
+                            : "Add keys like VITE_API_BASE. (Build-time only)"
                         }
                     </p>
 

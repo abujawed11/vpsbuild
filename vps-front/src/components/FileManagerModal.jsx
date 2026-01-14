@@ -69,7 +69,7 @@ export default function FileManagerModal({ projectId, projectName, onClose }) {
 
         try {
             const result = await fetch(
-                `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/api/projects/${projectId}/files/upload?path=${encodeURIComponent(currentPath)}`,
+                `${import.meta.env.VITE_API_BASE || "http://localhost:3000"}/api/projects/${projectId}/files/upload?path=${encodeURIComponent(currentPath)}`,
                 {
                     method: "POST",
                     headers: {
