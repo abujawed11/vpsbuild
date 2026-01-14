@@ -62,6 +62,11 @@ RUN npx prisma generate
   // Ensure server listens on 0.0.0.0
   const wrappedStart = `export HOST=0.0.0.0 && ${startCommand}`;
 
+  // If Prisma is detected, run migrations before starting
+  const startupCmd = hasPrisma
+    ? `npx prisma migrate deploy && ${wrappedStart}`
+    : wrappedStart;
+
   return `FROM node:18-alpine
 
 WORKDIR /app
@@ -81,7 +86,7 @@ ENV HOST=0.0.0.0
 EXPOSE ${port}
 
 # Start (ensure binding to 0.0.0.0)
-CMD sh -c "${wrappedStart}"
+CMD sh -c "${startupCmd}"
 `;
 }
 

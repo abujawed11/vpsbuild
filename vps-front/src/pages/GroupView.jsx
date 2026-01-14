@@ -102,13 +102,42 @@ export default function GroupView() {
                 token: getToken()
             });
 
-            alert(result.message || "Redeployment started successfully! Check the project status for updates.");
-            fetchGroup();
+            // Poll deployment status
+            const deploymentId = result.deploymentId;
+            pollDeploymentStatus(deploymentId, projectId);
         } catch (e) {
             alert(`Failed to start redeployment: ${e.message}`);
-        } finally {
             setRedeployingProjectId(null);
         }
+    };
+
+    // Poll deployment status until completion
+    const pollDeploymentStatus = async (deploymentId, projectId) => {
+        const pollInterval = setInterval(async () => {
+            try {
+                const deployment = await apiFetch(`/deployments/status/${deploymentId}`, {
+                    token: getToken()
+                });
+
+                // Check if deployment is finished
+                if (deployment.status === "DEPLOYED" || deployment.status === "FAILED") {
+                    clearInterval(pollInterval);
+                    setRedeployingProjectId(null);
+
+                    if (deployment.status === "DEPLOYED") {
+                        alert("✅ Redeployment successful!");
+                    } else {
+                        alert("❌ Redeployment failed! Check logs for details.");
+                    }
+
+                    fetchGroup(); // Refresh project status
+                }
+            } catch (e) {
+                clearInterval(pollInterval);
+                setRedeployingProjectId(null);
+                console.error("Failed to poll deployment status:", e);
+            }
+        }, 2000); // Poll every 2 seconds
     };
 
     if (err) return <div style={{ padding: 40, textAlign: "center" }}>Error: {err}</div>;
@@ -173,11 +202,11 @@ export default function GroupView() {
                             const statusStyle = statusColors[latestStatus] || statusColors.IDLE;
 
                             return (
-                                <div key={p.id} style={{ 
-                                    border: "1px solid #eee", 
-                                    padding: 20, 
-                                    borderRadius: 12, 
-                                    background: "white", 
+                                <div key={p.id} style={{
+                                    border: "1px solid #eee",
+                                    padding: 20,
+                                    borderRadius: 12,
+                                    background: "white",
                                     boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
                                     position: "relative"
                                 }}>
@@ -185,7 +214,7 @@ export default function GroupView() {
                                         <div style={{
                                             position: "absolute",
                                             top: 0, left: 0, right: 0, bottom: 0,
-                                            background: "rgba(255, 255, 255, 0.8)",
+                                            background: "rgba(255, 255, 255, 0.9)",
                                             display: "flex",
                                             flexDirection: "column",
                                             alignItems: "center",
@@ -196,6 +225,23 @@ export default function GroupView() {
                                         }}>
                                             <div className="spinner"></div>
                                             <span style={{ fontWeight: 600, color: "#c62828", fontSize: "0.9em" }}>Deleting...</span>
+                                        </div>
+                                    )}
+                                    {redeployingProjectId === p.id && (
+                                        <div style={{
+                                            position: "absolute",
+                                            top: 0, left: 0, right: 0, bottom: 0,
+                                            background: "rgba(255, 255, 255, 0.9)",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            borderRadius: 12,
+                                            zIndex: 20,
+                                            gap: 10
+                                        }}>
+                                            <div className="spinner"></div>
+                                            <span style={{ fontWeight: 600, color: "#2196F3", fontSize: "0.9em" }}>Redeploying...</span>
                                         </div>
                                     )}
                                     <h3 style={{ margin: "0 0 10px 0" }}>{p.name}</h3>
