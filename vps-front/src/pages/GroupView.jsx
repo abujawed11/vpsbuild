@@ -5,6 +5,7 @@ import { getToken } from "../lib/auth";
 import DeploymentWizard from "../components/DeploymentWizard";
 import EditEnvModal from "../components/EditEnvModal";
 import FileManagerModal from "../components/FileManagerModal";
+import ExecuteScriptModal from "../components/ExecuteScriptModal";
 
 export default function GroupView() {
     const { groupId } = useParams();
@@ -18,6 +19,7 @@ export default function GroupView() {
     const [editingEnvProjectId, setEditingEnvProjectId] = useState(null);
     const [managingFilesProjectId, setManagingFilesProjectId] = useState(null);
     const [redeployingProjectId, setRedeployingProjectId] = useState(null);
+    const [executingScriptProjectId, setExecutingScriptProjectId] = useState(null);
     const [redeployMessage, setRedeployMessage] = useState(null); // { type: 'success' | 'error', text: string }
     const redeployMessageTimeoutRef = useRef(null);
 
@@ -397,6 +399,29 @@ export default function GroupView() {
                                                     >
                                                         {redeployingProjectId === p.id ? "🔄 Redeploying..." : "🚀 Redeploy"}
                                                     </button>
+                                                    {(p.deployType === "BACKEND" || p.deployType === "FULLSTACK") && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setOpenMenuId(null);
+                                                                setExecutingScriptProjectId(p.id);
+                                                            }}
+                                                            style={{
+                                                                width: "100%",
+                                                                textAlign: "left",
+                                                                padding: "10px 15px",
+                                                                background: "none",
+                                                                border: "none",
+                                                                cursor: "pointer",
+                                                                fontSize: "0.9em",
+                                                                borderBottom: "1px solid #eee"
+                                                            }}
+                                                            onMouseEnter={e => e.target.style.background = "#f5f5f5"}
+                                                            onMouseLeave={e => e.target.style.background = "none"}
+                                                        >
+                                                            ▶️ Execute Script
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
@@ -447,6 +472,14 @@ export default function GroupView() {
                     projectId={managingFilesProjectId}
                     projectName={projects.find(p => p.id === managingFilesProjectId)?.name || ""}
                     onClose={() => setManagingFilesProjectId(null)}
+                />
+            )}
+
+            {executingScriptProjectId && (
+                <ExecuteScriptModal
+                    projectId={executingScriptProjectId}
+                    projectName={projects.find(p => p.id === executingScriptProjectId)?.name || ""}
+                    onClose={() => setExecutingScriptProjectId(null)}
                 />
             )}
         </div>

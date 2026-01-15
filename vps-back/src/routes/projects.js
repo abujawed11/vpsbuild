@@ -1156,4 +1156,102 @@ router.delete("/:id/files", authRequired, async (req, res) => {
   }
 });
 
+// POST /api/projects/:id/exec - Execute a command inside the project's container
+// Uses Server-Sent Events (SSE) to stream output in real-time
+router.post("/:id/exec", authRequired, async (req, res) => {
+    const { id } = req.params;
+    const { command } = req.body;
+
+    if (!command || typeof command !== "string" || !command.trim()) {
+        return res.status(400).json({ error: "Command is required" });
+    }
+
+    try {
+        const project = await prisma.project.findUnique({ where: { id } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        // Only backend/fullstack deployments have containers
+        if (project.deployType !== "BACKEND" && project.deployType !== "FULLSTACK") {
+            return res.status(400).json({ error: "This project does not have a running container (frontend-only deployment)" });
+        }
+
+        const containerName = project.slug;
+
+        // Check if container exists and is running
+        try {
+            const { execSync } = require("child_process");
+            const containerStatus = execSync(`docker inspect -f '{{.State.Running}}' ${containerName}`, { encoding: "utf8" }).trim();
+            if (containerStatus !== "true") {
+                return res.status(400).json({ error: "Container is not running. Deploy the project first." });
+            }
+        } catch {
+            return res.status(400).json({ error: "Container not found. Deploy the project first." });
+        }
+
+        // Set up SSE headers
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+        res.flushHeaders();
+
+        // Send initial message
+        res.write(`data: ${JSON.stringify({ type: "start", message: `Executing: ${command}` })}\n\n`);
+
+        const { spawn } = require("child_process");
+
+        // Execute command inside the container
+        const dockerExec = spawn("docker", ["exec", containerName, "sh", "-c", command], {
+            stdio: ["ignore", "pipe", "pipe"]
+        });
+
+        dockerExec.stdout.on("data", (data) => {
+            const lines = data.toString().split("\n");
+            for (const line of lines) {
+                if (line) {
+                    res.write(`data: ${JSON.stringify({ type: "stdout", message: line })}\n\n`);
+                }
+            }
+        });
+
+        dockerExec.stderr.on("data", (data) => {
+            const lines = data.toString().split("\n");
+            for (const line of lines) {
+                if (line) {
+                    res.write(`data: ${JSON.stringify({ type: "stderr", message: line })}\n\n`);
+                }
+            }
+        });
+
+        dockerExec.on("close", (code) => {
+            res.write(`data: ${JSON.stringify({ type: "exit", code, message: `Process exited with code ${code}` })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+            res.end();
+        });
+
+        dockerExec.on("error", (err) => {
+            res.write(`data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+            res.end();
+        });
+
+        // Handle client disconnect
+        req.on("close", () => {
+            dockerExec.kill();
+        });
+
+    } catch (err) {
+        console.error("Exec error:", err);
+        // If headers not sent yet, send JSON error
+        if (!res.headersSent) {
+            res.status(500).json({ error: err.message || "Failed to execute command" });
+        } else {
+            res.write(`data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`);
+            res.end();
+        }
+    }
+});
+
 module.exports = router;
