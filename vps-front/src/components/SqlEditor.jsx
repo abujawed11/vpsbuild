@@ -51,7 +51,7 @@ function getStatementAtCursor(text, cursorPosition) {
     return statements.find(s => cursorPosition >= s.start && cursorPosition <= s.end);
 }
 
-export default function SqlEditor({ defaultValue = "", onExecute, onExecuteAll, isLoading }) {
+export default function SqlEditor({ defaultValue = "", onChange, onExecute, onExecuteAll, isLoading }) {
     const [value, setValue] = useState(defaultValue);
     const [limit, setLimit] = useState(() => localStorage.getItem(STORAGE_KEY_LIMIT) || "1000");
     const [history, setHistory] = useState(() => {
@@ -98,15 +98,18 @@ export default function SqlEditor({ defaultValue = "", onExecute, onExecuteAll, 
         const limitVal = parseInt(limit, 10);
         if (isNaN(limitVal)) return sql;
 
+        // Only append limit to SELECT queries
+        const trimmedSql = sql.trim();
+        if (!/^SELECT\b/i.test(trimmedSql)) {
+            return sql;
+        }
+
         // Simple check if LIMIT already exists (case insensitive)
-        // This is a naive check; a robust one would require a parser, but sufficient for this prototype
-        if (!/\bLIMIT\s+\d+/i.test(sql)) {
-            // Remove trailing semicolon if present
-            const trimmed = sql.trim();
-            if (trimmed.endsWith(';')) {
-                return trimmed.slice(0, -1) + ` LIMIT ${limitVal};`;
+        if (!/\bLIMIT\s+\d+/i.test(trimmedSql)) {
+            if (trimmedSql.endsWith(';')) {
+                return trimmedSql.slice(0, -1) + ` LIMIT ${limitVal};`;
             }
-            return trimmed + ` LIMIT ${limitVal}`;
+            return trimmedSql + ` LIMIT ${limitVal}`;
         }
         return sql;
     };
