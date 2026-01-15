@@ -31,7 +31,7 @@ export default function ExecuteScriptModal({ projectId, projectName, onClose }) 
         setLogs([{ type: "info", message: `$ ${command}` }]);
 
         try {
-            const apiBase = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+            const apiBase = import.meta.env.VITE_API_BASE || "http://localhost:4000/api";
             const response = await fetch(`${apiBase}/projects/${projectId}/exec`, {
                 method: "POST",
                 headers: {
