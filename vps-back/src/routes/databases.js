@@ -689,6 +689,8 @@ router.get("/:id/tables/:tableName", authRequired, async (req, res) => {
             return res.status(404).json({ error: "Database not found" });
         }
 
+        console.log(`[Schema] Fetching schema for table: ${req.params.tableName}`);
+
         const schema = await getTableSchema(
             database.containerName,
             database.type,
@@ -698,9 +700,11 @@ router.get("/:id/tables/:tableName", authRequired, async (req, res) => {
             database.password
         );
 
+        console.log(`[Schema] Result:`, JSON.stringify(schema));
+
         res.json({ tableName: req.params.tableName, ...schema });
     } catch (err) {
-        console.error(err);
+        console.error('[Schema] Error:', err);
         res.status(500).json({ error: "Failed to get table schema" });
     }
 });

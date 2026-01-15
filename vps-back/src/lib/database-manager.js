@@ -500,8 +500,11 @@ async function getTableSchema(containerName, type, dbName, tableName, username, 
     }
 
     try {
+        console.log(`[getTableSchema] Running command: ${cmd}`);
         const { stdout } = await execPromise(cmd, { timeout: 10000 });
+        console.log(`[getTableSchema] Raw output:`, stdout);
         const lines = stdout.trim().split('\n').filter(l => l.trim());
+        console.log(`[getTableSchema] Lines:`, lines);
 
         let columns = [];
 

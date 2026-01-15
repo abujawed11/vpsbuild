@@ -85,7 +85,7 @@ export default function DatabaseManagement() {
             ]);
             setTableData({
                 name: tableName,
-                schema: schemaRes.schema,
+                columns: schemaRes.columns,
                 ...rowsRes
             });
         } catch (e) {
