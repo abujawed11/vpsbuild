@@ -365,7 +365,6 @@ async function executeMySQLQuery(containerName, dbName, username, password, quer
     // Escape single quotes in query
     const escapedQuery = query.replace(/'/g, "'\\''");
 
-    // Use --column-names to ensure headers are always returned
     const cmd = `docker exec ${containerName} mysql -u${username} -p'${password}' ${dbName} -e '${escapedQuery}' --batch --raw --column-names`;
 
     try {
@@ -373,14 +372,31 @@ async function executeMySQLQuery(containerName, dbName, username, password, quer
         const { stdout, stderr } = await execPromise(cmd, { timeout: 30000 });
         const executionTime = Date.now() - startTime;
 
-        console.log('[MySQL Query] Raw output:', JSON.stringify(stdout));
-
         // Parse output
         const lines = stdout.trim().split('\n').filter(l => l.length > 0);
-        console.log('[MySQL Query] Lines:', lines);
 
-        const fields = lines[0] ? lines[0].split('\t').map(name => ({ name, type: 'unknown' })) : [];
-        console.log('[MySQL Query] Fields:', fields);
+        let fields = lines[0] ? lines[0].split('\t').map(name => ({ name, type: 'unknown' })) : [];
+
+        // If SELECT query returns empty, try to get column names from the table
+        if (fields.length === 0 && query.trim().toUpperCase().startsWith('SELECT')) {
+            // Extract table name from SELECT query (simple parsing)
+            const fromMatch = query.match(/FROM\s+[`"]?(\w+)[`"]?/i);
+            if (fromMatch) {
+                const tableName = fromMatch[1];
+                try {
+                    const descCmd = `docker exec ${containerName} mysql -u${username} -p'${password}' ${dbName} -e 'SHOW COLUMNS FROM ${tableName};' --batch --raw`;
+                    const { stdout: descOut } = await execPromise(descCmd, { timeout: 5000 });
+                    const descLines = descOut.trim().split('\n').filter(l => l.length > 0);
+                    // Skip header line, get field names from first column
+                    fields = descLines.slice(1).map(line => {
+                        const parts = line.split('\t');
+                        return { name: parts[0], type: parts[1] || 'unknown' };
+                    });
+                } catch (e) {
+                    // Ignore errors getting column info
+                }
+            }
+        }
 
         const rows = lines.slice(1).map(line => {
             const values = line.split('\t');
@@ -399,7 +415,6 @@ async function executeMySQLQuery(containerName, dbName, username, password, quer
             executionTime
         };
     } catch (err) {
-        console.error('[MySQL Query] Error:', err.message);
         return {
             success: false,
             error: err.message,
