@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { clearToken, getToken } from "../lib/auth";
+import SqlEditor from "../components/SqlEditor";
 
 export default function DatabaseManagement() {
     const { id } = useParams();
@@ -14,9 +15,8 @@ export default function DatabaseManagement() {
 
     // Query Editor state
     const [query, setQuery] = useState("");
-    const [queryResult, setQueryResult] = useState(null);
+    const [queryResults, setQueryResults] = useState([]); // Array of result objects
     const [queryLoading, setQueryLoading] = useState(false);
-    const [queryError, setQueryError] = useState("");
 
     // Tables state
     const [tables, setTables] = useState([]);
@@ -182,31 +182,120 @@ export default function DatabaseManagement() {
         }
     };
 
-    const executeQuery = async () => {
-        if (!query.trim()) return;
+    const executeSingleQuery = async (sqlString) => {
+        if (!sqlString.trim()) return;
         setQueryLoading(true);
-        setQueryError("");
-        setQueryResult(null);
+        setQueryResults([]); // Clear previous results
         try {
+            const start = performance.now();
             const res = await apiFetch(`/databases/${id}/query`, {
                 method: "POST",
                 token: getToken(),
-                body: { query: query.trim() }
+                body: { query: sqlString.trim() }
             });
-            if (res.success) {
-                setQueryResult(res);
-            } else {
-                setQueryError(res.error);
+            const end = performance.now();
+            
+            const resultObj = {
+                query: sqlString,
+                timestamp: new Date(),
+                ...res,
+                // If backend returns executionTime, use it, else calculated
+                executionTime: res.executionTime || Math.round(end - start)
+            };
+            
+            if (!res.success) {
+                resultObj.error = res.error;
             }
+
+            setQueryResults([resultObj]);
         } catch (e) {
-            setQueryError(e.message);
+            setQueryResults([{
+                query: sqlString,
+                timestamp: new Date(),
+                error: e.message,
+                success: false
+            }]);
         } finally {
             setQueryLoading(false);
         }
     };
 
+    const executeMultipleQueries = async (queries) => {
+        if (!queries || queries.length === 0) return;
+        setQueryLoading(true);
+        setQueryResults([]);
+        
+        const newResults = [];
+        
+        for (const sql of queries) {
+            try {
+                const start = performance.now();
+                const res = await apiFetch(`/databases/${id}/query`, {
+                    method: "POST",
+                    token: getToken(),
+                    body: { query: sql.trim() }
+                });
+                const end = performance.now();
+                
+                const resultObj = {
+                    query: sql,
+                    timestamp: new Date(),
+                    ...res,
+                    executionTime: res.executionTime || Math.round(end - start)
+                };
+                
+                if (!res.success) {
+                    resultObj.error = res.error;
+                    newResults.push(resultObj);
+                    break; // Stop on first error
+                }
+                newResults.push(resultObj);
+            } catch (e) {
+                newResults.push({
+                    query: sql,
+                    timestamp: new Date(),
+                    error: e.message,
+                    success: false
+                });
+                break; // Stop on error
+            }
+        }
+        
+        setQueryResults(newResults);
+        setQueryLoading(false);
+    };
+
     const copyToClipboard = (text) => {
         navigator.clipboard.writeText(text);
+    };
+
+    const downloadCSV = (data, filename) => {
+        if (!data || !data.length) return;
+        const headers = Object.keys(data[0]);
+        const csvContent = [
+            headers.join(','),
+            ...data.map(row => headers.map(h => {
+                const val = row[h] === null ? '' : String(row[h]);
+                if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+                    return `"${val.replace( /"/g, '""')}"`;
+                }
+                return val;
+            }).join(','))
+        ].join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+    };
+
+    const downloadJSON = (data, filename) => {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
     };
 
     const getStatusColor = (status) => {
@@ -321,7 +410,7 @@ export default function DatabaseManagement() {
                     <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20, marginBottom: 20 }}>
                         <h3 style={{ margin: "0 0 16px 0" }}>Connection Details</h3>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            {[
+                            {[ 
                                 { label: "Host", value: database.host },
                                 { label: "Port", value: database.port },
                                 { label: "Database", value: database.dbName },
@@ -408,85 +497,100 @@ export default function DatabaseManagement() {
 
             {activeTab === "query" && (
                 <div>
-                    <div style={{ marginBottom: 16 }}>
-                        <textarea
-                            value={query}
-                            onChange={e => setQuery(e.target.value)}
-                            placeholder={`Enter your ${database.type === 'MYSQL' ? 'MySQL' : 'PostgreSQL'} query here...\n\nExample: SELECT * FROM users LIMIT 10;`}
-                            style={{
-                                width: "100%",
-                                height: 150,
-                                padding: 12,
-                                borderRadius: 6,
-                                border: "1px solid #ddd",
-                                fontFamily: "monospace",
-                                fontSize: "0.9em",
-                                resize: "vertical",
-                                boxSizing: "border-box"
-                            }}
-                            onKeyDown={e => {
-                                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                    executeQuery();
-                                }
-                            }}
+                    <div style={{ marginBottom: 20 }}>
+                        <SqlEditor
+                            defaultValue={query}
+                            onChange={setQuery}
+                            onExecute={executeSingleQuery}
+                            onExecuteAll={executeMultipleQueries}
+                            isLoading={queryLoading}
                         />
                     </div>
-                    <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-                        <button onClick={executeQuery} disabled={queryLoading || !query.trim()} style={{ background: "#2196F3", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
-                            {queryLoading ? "Running..." : "Run Query"} (Ctrl+Enter)
-                        </button>
-                        <button onClick={() => { setQuery(""); setQueryResult(null); setQueryError(""); }} style={{ background: "#f0f0f0", color: "#333", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
-                            Clear
-                        </button>
-                    </div>
 
-                    {queryError && (
-                        <div style={{ background: "#ffebee", color: "#c62828", padding: 16, borderRadius: 6, marginBottom: 16, fontFamily: "monospace", fontSize: "0.9em" }}>
-                            {queryError}
-                        </div>
-                    )}
-
-                    {queryResult && (
-                        <div>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                                <span style={{ color: "#4caf50", fontWeight: 500 }}>
-                                    ✓ Query executed in {queryResult.executionTime}ms ({queryResult.rowCount} rows)
-                                </span>
+                    {queryResults.map((result, idx) => (
+                        <div key={idx} style={{ marginBottom: 30, border: "1px solid #e0e0e0", borderRadius: 8, overflow: "hidden" }}>
+                            {/* Result Header */}
+                            <div style={{ background: "#f5f5f5", padding: "10px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <div style={{ flex: 1, marginRight: 16 }}>
+                                    <div style={{ fontFamily: "monospace", fontSize: "0.85em", color: "#555", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 600 }} title={result.query}>
+                                        {result.query}
+                                    </div>
+                                </div>
+                                <div style={{ fontSize: "0.85em", color: result.success === false ? "#f44336" : "#4caf50", fontWeight: 600 }}>
+                                    {result.success !== false ? 
+                                        `✓ ${result.rowCount} row${result.rowCount !== 1 ? 's' : ''} in ${result.executionTime}ms` : 
+                                        "⚠ Error"}
+                                </div>
                             </div>
-                            {queryResult.fields && queryResult.fields.length > 0 && (
-                                <div style={{ overflowX: "auto", border: "1px solid #e0e0e0", borderRadius: 6 }}>
-                                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
-                                        <thead>
-                                            <tr style={{ background: "#f5f5f5" }}>
-                                                {queryResult.fields.map((f, i) => (
-                                                    <th key={i} style={{ padding: "10px 12px", textAlign: "left", borderBottom: "1px solid #e0e0e0" }}>
-                                                        {f.name}
-                                                    </th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {queryResult.results.length > 0 ? (
-                                                queryResult.results.map((row, i) => (
-                                                    <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                                                        {queryResult.fields.map((f, j) => (
-                                                            <td key={j} style={{ padding: "8px 12px", fontFamily: "monospace" }}>
-                                                                {row[f.name] === null ? <span style={{ color: "#999" }}>NULL</span> : String(row[f.name])}
-                                                            </td>
-                                                        ))}
-                                                    </tr>
-                                                ))
-                                            ) : (
-                                                <tr>
-                                                    <td colSpan={queryResult.fields.length} style={{ padding: "20px", textAlign: "center", color: "#999" }}>
-                                                        No rows returned
-                                                    </td>
-                                                </tr>
+
+                            {/* Result Content */}
+                            {result.success === false ? (
+                                <div style={{ padding: 16, color: "#c62828", fontFamily: "monospace", fontSize: "0.9em", background: "#ffebee" }}>
+                                    {result.error}
+                                </div>
+                            ) : (
+                                <div>
+                                    {result.fields && result.fields.length > 0 && (
+                                        <>
+                                            <div style={{ overflowX: "auto", maxHeight: 400 }}>
+                                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
+                                                    <thead style={{ position: "sticky", top: 0, background: "white", zIndex: 1 }}>
+                                                        <tr style={{ background: "#f9f9f9", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>
+                                                            {result.fields.map((f, i) => (
+                                                                <th key={i} style={{ padding: "10px 12px", textAlign: "left", borderBottom: "1px solid #e0e0e0", whiteSpace: "nowrap" }}>
+                                                                    {f.name}
+                                                                </th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {result.results.length > 0 ? (
+                                                            result.results.map((row, i) => (
+                                                                <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                                                                    {result.fields.map((f, j) => (
+                                                                        <td key={j} style={{ padding: "8px 12px", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                                                                            {row[f.name] === null ? <span style={{ color: "#999" }}>NULL</span> : String(row[f.name])}
+                                                                        </td>
+                                                                    ))}
+                                                                </tr>
+                                                            ))
+                                                        ) : (
+                                                            <tr>
+                                                                <td colSpan={result.fields.length} style={{ padding: "20px", textAlign: "center", color: "#999" }}>
+                                                                    No rows returned
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            {/* Export Bar */}
+                                            {result.results.length > 0 && (
+                                                <div style={{ padding: "8px 16px", background: "#fcfcfc", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                                                    <button 
+                                                        onClick={() => downloadCSV(result.results, `query_result_${idx}.csv`)}
+                                                        style={{ background: "none", border: "1px solid #ddd", borderRadius: 4, padding: "4px 10px", fontSize: "0.85em", cursor: "pointer", color: "#666" }}
+                                                    >
+                                                        Export CSV
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => downloadJSON(result.results, `query_result_${idx}.json`)}
+                                                        style={{ background: "none", border: "1px solid #ddd", borderRadius: 4, padding: "4px 10px", fontSize: "0.85em", cursor: "pointer", color: "#666" }}
+                                                    >
+                                                        Export JSON
+                                                    </button>
+                                                </div>
                                             )}
-                                        </tbody>
-                                    </table>
+                                        </>
+                                    )}
                                 </div>
                             )}
+                        </div>
+                    ))}
+                    
+                    {queryResults.length === 0 && !queryLoading && (
+                        <div style={{ textAlign: "center", padding: 40, color: "#999", background: "#f9f9f9", borderRadius: 8 }}>
+                            Run a query to see results
                         </div>
                     )}
                 </div>
