@@ -353,6 +353,36 @@ async function getDatabaseStats(containerName, type) {
 }
 
 /**
+ * Parse MySQL error message to be user friendly
+ * @param {string} rawError - Raw error string from stderr/stdout
+ * @returns {string} - Clean error message
+ */
+function parseMySQLError(rawError) {
+    if (!rawError) return "Unknown error";
+
+    // Common patterns:
+    // "ERROR 1062 (23000) at line 1: Duplicate entry ..."
+    // "ERROR 1064 (42000) at line 1: You have an error in your SQL syntax ..."
+    
+    // Regex to capture the message after "ERROR X (Y) at line Z: "
+    const errorMatch = rawError.match(/ERROR \d+ \(\w+\) at line \d+: (.+)/);
+    if (errorMatch && errorMatch[1]) {
+        return errorMatch[1].trim();
+    }
+    
+    // Fallback: if it starts with "Command failed", try to strip that part
+    if (rawError.includes("Command failed:")) {
+        // Try to find "ERROR ..." part
+        const errPart = rawError.split(/ERROR \d+ \(\w+\)/)[1];
+        if (errPart) {
+             return "SQL Error: " + errPart.replace(/^ at line \d+:/, '').trim();
+        }
+    }
+
+    return rawError;
+}
+
+/**
  * Execute a query on a MySQL database
  * @param {string} containerName - Container name
  * @param {string} dbName - Database name
@@ -417,10 +447,27 @@ async function executeMySQLQuery(containerName, dbName, username, password, quer
     } catch (err) {
         return {
             success: false,
-            error: err.message,
+            error: parseMySQLError(err.message),
             sqlState: null
         };
     }
+}
+
+/**
+ * Parse Postgres error message
+ * @param {string} rawError - Raw error
+ * @returns {string} - Clean error
+ */
+function parsePostgresError(rawError) {
+    if (!rawError) return "Unknown error";
+    
+    // Postgres often returns "ERROR:  message"
+    const match = rawError.match(/ERROR:\s+(.+?)(\n|$)/);
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    
+    return rawError;
 }
 
 /**
@@ -461,7 +508,7 @@ async function executePostgresQuery(containerName, dbName, username, password, q
     } catch (err) {
         return {
             success: false,
-            error: err.message,
+            error: parsePostgresError(err.message),
             sqlState: null
         };
     }
