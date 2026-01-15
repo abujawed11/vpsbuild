@@ -360,23 +360,29 @@ async function getDatabaseStats(containerName, type) {
 function parseMySQLError(rawError) {
     if (!rawError) return "Unknown error";
 
-    // Common patterns:
-    // "ERROR 1062 (23000) at line 1: Duplicate entry ..."
-    // "ERROR 1064 (42000) at line 1: You have an error in your SQL syntax ..."
+    // Standard MySQL error pattern: ERROR <Code> (<State>) at line <Line>: <Message>
+    // Example: ERROR 1146 (42S02) at line 1: Table 'testdb.emp1' doesn't exist
+    // Use [\s\S] to match any character including newlines
+    const match = rawError.match(/ERROR \d+ \([^)]+\) at line \d+: ([\s\S]+)/);
     
-    // Regex to capture the message after "ERROR X (Y) at line Z: "
-    const errorMatch = rawError.match(/ERROR \d+ \(\w+\) at line \d+: (.+)/);
-    if (errorMatch && errorMatch[1]) {
-        return errorMatch[1].trim();
+    if (match && match[1]) {
+        return match[1].trim();
     }
     
-    // Fallback: if it starts with "Command failed", try to strip that part
-    if (rawError.includes("Command failed:")) {
-        // Try to find "ERROR ..." part
-        const errPart = rawError.split(/ERROR \d+ \(\w+\)/)[1];
-        if (errPart) {
-             return "SQL Error: " + errPart.replace(/^ at line \d+:/, '').trim();
+    // Fallback: Check for "ERROR <Code>: <Message>" format or just last "ERROR" segment
+    if (rawError.includes("ERROR ")) {
+        const parts = rawError.split("ERROR ");
+        // Get the last part as it's most likely the actual error from the DB
+        const lastPart = parts[parts.length - 1];
+        
+        // If it starts with a number (Error Code), clean it up
+        if (/^\d+/.test(lastPart)) {
+             // Try to strip "1234 (XY000) at line 1:" prefix
+             return lastPart.replace(/^\d+ \([^)]+\) at line \d+:\s*/, "")
+                            .replace(/^\d+:\s*/, "") // Strip "1234: "
+                            .trim();
         }
+        return lastPart.trim();
     }
 
     return rawError;
