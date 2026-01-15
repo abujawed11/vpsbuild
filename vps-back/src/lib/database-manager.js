@@ -365,16 +365,23 @@ async function executeMySQLQuery(containerName, dbName, username, password, quer
     // Escape single quotes in query
     const escapedQuery = query.replace(/'/g, "'\\''");
 
-    const cmd = `docker exec ${containerName} mysql -u${username} -p'${password}' ${dbName} -e '${escapedQuery}' --batch --raw`;
+    // Use --column-names to ensure headers are always returned
+    const cmd = `docker exec ${containerName} mysql -u${username} -p'${password}' ${dbName} -e '${escapedQuery}' --batch --raw --column-names`;
 
     try {
         const startTime = Date.now();
         const { stdout, stderr } = await execPromise(cmd, { timeout: 30000 });
         const executionTime = Date.now() - startTime;
 
+        console.log('[MySQL Query] Raw output:', JSON.stringify(stdout));
+
         // Parse output
-        const lines = stdout.trim().split('\n');
+        const lines = stdout.trim().split('\n').filter(l => l.length > 0);
+        console.log('[MySQL Query] Lines:', lines);
+
         const fields = lines[0] ? lines[0].split('\t').map(name => ({ name, type: 'unknown' })) : [];
+        console.log('[MySQL Query] Fields:', fields);
+
         const rows = lines.slice(1).map(line => {
             const values = line.split('\t');
             const row = {};
@@ -392,6 +399,7 @@ async function executeMySQLQuery(containerName, dbName, username, password, quer
             executionTime
         };
     } catch (err) {
+        console.error('[MySQL Query] Error:', err.message);
         return {
             success: false,
             error: err.message,
