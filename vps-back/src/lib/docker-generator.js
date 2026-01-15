@@ -62,10 +62,11 @@ RUN npx prisma generate
   // Ensure server listens on 0.0.0.0
   const wrappedStart = `export HOST=0.0.0.0 && ${startCommand}`;
 
-  // If Prisma is detected, try to run migrations and regenerate client before starting
-  // Use || true to continue even if migrations fail (DB might be unreachable)
+  // If Prisma is detected, sync schema with db push (safer than migrate deploy for fresh DBs)
+  // db push syncs schema without migration history - perfect for Netlify-style deployments
+  // Use || true to continue even if push fails (DB might be unreachable)
   const startupCmd = hasPrisma
-    ? `(npx prisma migrate deploy && npx prisma generate) || echo "Warning: Prisma migrations/generate failed, starting app anyway..."; ${wrappedStart}`
+    ? `(npx prisma db push --skip-generate --accept-data-loss && npx prisma generate) || echo "Warning: Prisma db push/generate failed, starting app anyway..."; ${wrappedStart}`
     : wrappedStart;
 
   return `FROM node:18-alpine

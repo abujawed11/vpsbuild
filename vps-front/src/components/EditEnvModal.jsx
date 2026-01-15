@@ -11,9 +11,15 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const [successMessage, setSuccessMessage] = useState("");
+    const [databases, setDatabases] = useState([]);
+    const [dbLoading, setDbLoading] = useState(false);
+    const [selectedDbId, setSelectedDbId] = useState("");
+    const [linkingDb, setLinkingDb] = useState(false);
+    const [redeploying, setRedeploying] = useState(false);
 
     useEffect(() => {
         fetchEnvVars();
+        fetchDatabases();
     }, [projectId]);
 
     const fetchEnvVars = async () => {
@@ -29,6 +35,59 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
             setError(e.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchDatabases = async () => {
+        try {
+            setDbLoading(true);
+            const res = await apiFetch("/databases", { token: getToken() });
+            setDatabases(res.databases || []);
+        } catch {
+            // Ignore: env editing still works without this convenience.
+        } finally {
+            setDbLoading(false);
+        }
+    };
+
+    const attachManagedDatabase = async () => {
+        if (!selectedDbId) return;
+        setLinkingDb(true);
+        setError("");
+        setSuccessMessage("");
+        try {
+            const r = await apiFetch(`/databases/${selectedDbId}/link-project`, {
+                method: "POST",
+                token: getToken(),
+                body: { projectId }
+            });
+            setSuccessMessage(r.message || "Database linked and env vars updated.");
+            await fetchEnvVars();
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setLinkingDb(false);
+        }
+    };
+
+    const redeployNow = async () => {
+        setRedeploying(true);
+        setError("");
+        setSuccessMessage("");
+        try {
+            const r = await apiFetch(`/deployments/${projectId}/redeploy`, {
+                method: "POST",
+                token: getToken()
+            });
+            setSuccessMessage(`Redeploy queued (deploymentId: ${r.deploymentId})`);
+            setTimeout(() => {
+                onSuccess();
+                onClose();
+            }, 1500);
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setRedeploying(false);
         }
     };
 
@@ -148,6 +207,68 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
                     <p style={{ margin: "5px 0 0 0", fontSize: "0.85em", color: "#888" }}>
                         <strong>Note:</strong> PORT, NODE_ENV, and HOST are managed automatically and cannot be edited here.
                     </p>
+                </div>
+
+                <div style={{
+                    background: "#f9f9f9",
+                    border: "1px solid #eee",
+                    borderRadius: 10,
+                    padding: 14,
+                    marginBottom: 16
+                }}>
+                    <div style={{ fontWeight: 600, marginBottom: 10 }}>Managed Database</div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                        <select
+                            value={selectedDbId}
+                            onChange={(e) => setSelectedDbId(e.target.value)}
+                            disabled={dbLoading || linkingDb}
+                            style={{
+                                flex: 1,
+                                minWidth: 260,
+                                padding: 10,
+                                borderRadius: 6,
+                                border: "1px solid #ddd"
+                            }}
+                        >
+                            <option value="">{dbLoading ? "Loading databases..." : "Select a managed database..."}</option>
+                            {databases.map((db) => (
+                                <option key={db.id} value={db.id}>
+                                    {db.name} ({db.type})
+                                </option>
+                            ))}
+                        </select>
+                        <button
+                            onClick={attachManagedDatabase}
+                            disabled={!selectedDbId || linkingDb}
+                            style={{
+                                background: linkingDb ? "#90caf9" : "#2196F3",
+                                color: "white",
+                                border: "none",
+                                borderRadius: 6,
+                                padding: "10px 14px",
+                                cursor: !selectedDbId || linkingDb ? "not-allowed" : "pointer"
+                            }}
+                        >
+                            {linkingDb ? "Attaching..." : "Attach & set URL"}
+                        </button>
+                        <button
+                            onClick={redeployNow}
+                            disabled={redeploying}
+                            style={{
+                                background: redeploying ? "#c5e1a5" : "#4caf50",
+                                color: "white",
+                                border: "none",
+                                borderRadius: 6,
+                                padding: "10px 14px",
+                                cursor: redeploying ? "not-allowed" : "pointer"
+                            }}
+                        >
+                            {redeploying ? "Redeploying..." : "Redeploy now"}
+                        </button>
+                    </div>
+                    <div style={{ marginTop: 8, fontSize: "0.85em", color: "#666" }}>
+                        This injects the correct URL into your project env vars (without revealing the DB password).
+                    </div>
                 </div>
 
                 {error && (

@@ -604,15 +604,10 @@ router.post("/:id/env-vars/hot-reload", authRequired, async (req, res) => {
             execSync(`docker rm ${project.slug}`, { stdio: 'ignore' });
         } catch {}
 
-        // Start new container with updated env vars
-        const runCmd = `docker run -d --name ${project.slug} --restart unless-stopped --memory="512m" --cpus="1.0" ${nodeEnv} ${portEnv} ${envFlags} ${imageTag}`;
+        // Start new container with updated env vars (attach to gateway network immediately)
+        const gatewayNetwork = process.env.GATEWAY_NETWORK || "vpsbuilds_default";
+        const runCmd = `docker run -d --name ${project.slug} --network ${gatewayNetwork} --restart unless-stopped --memory="512m" --cpus="1.0" ${nodeEnv} ${portEnv} ${envFlags} ${imageTag}`;
         execSync(runCmd);
-
-        // Connect to gateway network
-        try {
-            const gatewayNetwork = process.env.GATEWAY_NETWORK || "vpsbuilds_default";
-            execSync(`docker network connect ${gatewayNetwork} ${project.slug}`, { stdio: 'ignore' });
-        } catch {}
 
         res.json({ success: true, message: "Environment variables updated and container restarted successfully." });
     } catch (err) {
