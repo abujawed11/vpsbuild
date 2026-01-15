@@ -265,8 +265,32 @@ export default function DatabaseManagement() {
         setQueryLoading(false);
     };
 
-    const copyToClipboard = (text) => {
-        navigator.clipboard.writeText(text);
+    const copyToClipboard = async (text) => {
+        if (!text) return;
+        
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                // Optional: visual feedback
+            } else {
+                // Fallback for insecure contexts
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-9999px";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                } catch (err) {
+                    console.error('Fallback: Oops, unable to copy', err);
+                }
+                document.body.removeChild(textArea);
+            }
+        } catch (err) {
+            console.error('Failed to copy: ', err);
+        }
     };
 
     const downloadCSV = (data, filename) => {
