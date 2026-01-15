@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
@@ -18,6 +18,8 @@ export default function GroupView() {
     const [editingEnvProjectId, setEditingEnvProjectId] = useState(null);
     const [managingFilesProjectId, setManagingFilesProjectId] = useState(null);
     const [redeployingProjectId, setRedeployingProjectId] = useState(null);
+    const [redeployMessage, setRedeployMessage] = useState(null); // { type: 'success' | 'error', text: string }
+    const redeployMessageTimeoutRef = useRef(null);
 
     const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
     const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
@@ -39,6 +41,24 @@ export default function GroupView() {
             return () => document.removeEventListener("click", handleClickOutside);
         }
     }, [openMenuId]);
+
+    useEffect(() => {
+        return () => {
+            if (redeployMessageTimeoutRef.current) {
+                clearTimeout(redeployMessageTimeoutRef.current);
+                redeployMessageTimeoutRef.current = null;
+            }
+        };
+    }, []);
+
+    const showRedeployMessage = (type, text, timeoutMs = 4000) => {
+        setRedeployMessage({ type, text });
+        if (redeployMessageTimeoutRef.current) clearTimeout(redeployMessageTimeoutRef.current);
+        redeployMessageTimeoutRef.current = setTimeout(() => {
+            setRedeployMessage(null);
+            redeployMessageTimeoutRef.current = null;
+        }, timeoutMs);
+    };
 
     const fetchGroup = async () => {
         try {
@@ -95,6 +115,7 @@ export default function GroupView() {
         if (!confirmed) return;
 
         setRedeployingProjectId(projectId);
+        setRedeployMessage(null);
 
         try {
             const result = await apiFetch(`/deployments/${projectId}/redeploy`, {
@@ -106,7 +127,7 @@ export default function GroupView() {
             const deploymentId = result.deploymentId;
             pollDeploymentStatus(deploymentId, projectId);
         } catch (e) {
-            alert(`Failed to start redeployment: ${e.message}`);
+            showRedeployMessage("error", `Failed to start redeployment: ${e.message}`);
             setRedeployingProjectId(null);
         }
     };
@@ -125,9 +146,9 @@ export default function GroupView() {
                     setRedeployingProjectId(null);
 
                     if (deployment.status === "DEPLOYED") {
-                        alert("✅ Redeployment successful!");
+                        showRedeployMessage("success", "Redeployment successful!");
                     } else {
-                        alert("❌ Redeployment failed! Check logs for details.");
+                        showRedeployMessage("error", "Redeployment failed! Check logs for details.");
                     }
 
                     fetchGroup(); // Refresh project status
@@ -135,7 +156,7 @@ export default function GroupView() {
             } catch (e) {
                 clearInterval(pollInterval);
                 setRedeployingProjectId(null);
-                console.error("Failed to poll deployment status:", e);
+                showRedeployMessage("error", e.message || "Failed to poll deployment status");
             }
         }, 2000); // Poll every 2 seconds
     };
@@ -163,6 +184,21 @@ export default function GroupView() {
                     </button>
                 )}
             </div>
+
+            {redeployMessage && (
+                <div style={{
+                    marginBottom: 20,
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    border: "1px solid",
+                    borderColor: redeployMessage.type === "success" ? "#c8e6c9" : "#ef9a9a",
+                    background: redeployMessage.type === "success" ? "#e8f5e9" : "#ffebee",
+                    color: redeployMessage.type === "success" ? "#2e7d32" : "#c62828",
+                    fontWeight: 600
+                }}>
+                    {redeployMessage.text}
+                </div>
+            )}
 
             {showWizard ? (
                 <div>

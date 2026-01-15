@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 
@@ -16,11 +16,22 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
     const [selectedDbId, setSelectedDbId] = useState("");
     const [linkingDb, setLinkingDb] = useState(false);
     const [redeploying, setRedeploying] = useState(false);
+    const [redeployStatusText, setRedeployStatusText] = useState("");
+    const redeployPollRef = useRef(null);
 
     useEffect(() => {
         fetchEnvVars();
         fetchDatabases();
     }, [projectId]);
+
+    useEffect(() => {
+        return () => {
+            if (redeployPollRef.current) {
+                clearInterval(redeployPollRef.current);
+                redeployPollRef.current = null;
+            }
+        };
+    }, []);
 
     const fetchEnvVars = async () => {
         try {
@@ -70,23 +81,65 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
         }
     };
 
+    const pollDeploymentStatus = async (deploymentId) => {
+        if (redeployPollRef.current) {
+            clearInterval(redeployPollRef.current);
+            redeployPollRef.current = null;
+        }
+
+        redeployPollRef.current = setInterval(async () => {
+            try {
+                const deployment = await apiFetch(`/deployments/status/${deploymentId}`, {
+                    token: getToken()
+                });
+
+                setRedeployStatusText(deployment?.status ? `Status: ${deployment.status}` : "");
+
+                if (deployment.status === "DEPLOYED" || deployment.status === "FAILED") {
+                    clearInterval(redeployPollRef.current);
+                    redeployPollRef.current = null;
+
+                    if (deployment.status === "DEPLOYED") {
+                        setSuccessMessage("Redeployment successful!");
+                        setError("");
+                        setTimeout(() => {
+                            onSuccess();
+                            onClose();
+                        }, 800);
+                    } else {
+                        setError("Redeployment failed! Check logs for details.");
+                    }
+
+                    setRedeploying(false);
+                }
+            } catch (e) {
+                clearInterval(redeployPollRef.current);
+                redeployPollRef.current = null;
+                setRedeploying(false);
+                setError(e.message || "Failed to poll deployment status");
+            }
+        }, 2000);
+    };
+
     const redeployNow = async () => {
+        const confirmed = window.confirm(
+            `Redeploy "${projectName}"?\n\nThis will redeploy your project with the latest environment variables.`
+        );
+        if (!confirmed) return;
+
         setRedeploying(true);
         setError("");
         setSuccessMessage("");
+        setRedeployStatusText("");
         try {
             const r = await apiFetch(`/deployments/${projectId}/redeploy`, {
                 method: "POST",
                 token: getToken()
             });
             setSuccessMessage(`Redeploy queued (deploymentId: ${r.deploymentId})`);
-            setTimeout(() => {
-                onSuccess();
-                onClose();
-            }, 1500);
+            await pollDeploymentStatus(r.deploymentId);
         } catch (e) {
             setError(e.message);
-        } finally {
             setRedeploying(false);
         }
     };
@@ -176,10 +229,35 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
                     width: "90%",
                     maxHeight: "80vh",
                     overflow: "auto",
-                    boxShadow: "0 10px 40px rgba(0,0,0,0.3)"
+                    boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+                    position: "relative"
                 }}
                 onClick={e => e.stopPropagation()}
             >
+                {redeploying && (
+                    <div style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: "rgba(255, 255, 255, 0.9)",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 12,
+                        zIndex: 50,
+                        gap: 10
+                    }}>
+                        <div className="spinner"></div>
+                        <span style={{ fontWeight: 600, color: "#2196F3", fontSize: "0.95em" }}>Redeploying...</span>
+                        {redeployStatusText && (
+                            <span style={{ color: "#666", fontSize: "0.85em" }}>{redeployStatusText}</span>
+                        )}
+                    </div>
+                )}
+
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                     <h2 style={{ margin: 0 }}>Edit Environment Variables</h2>
                     <button
