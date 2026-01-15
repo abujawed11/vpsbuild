@@ -62,10 +62,33 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
         }
     };
 
-    const copyToClipboard = (text, field) => {
-        navigator.clipboard.writeText(text);
-        setCopied(field);
-        setTimeout(() => setCopied(""), 2000);
+    const copyToClipboard = async (text, field) => {
+        if (!text) return;
+
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                // Fallback for insecure contexts
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-9999px";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                } catch (err) {
+                    console.error('Fallback: Oops, unable to copy', err);
+                }
+                document.body.removeChild(textArea);
+            }
+            setCopied(field);
+            setTimeout(() => setCopied(""), 2000);
+        } catch (err) {
+            console.error('Failed to copy: ', err);
+        }
     };
 
     const downloadEnv = () => {
