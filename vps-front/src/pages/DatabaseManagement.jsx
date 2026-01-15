@@ -653,6 +653,11 @@ export default function DatabaseManagement() {
                                         </>
                                     ) : (
                                         <div style={{ padding: 16 }}>
+                                            {result.message && (
+                                                <div style={{ marginBottom: 12, padding: "10px 12px", background: "#f9f9f9", border: "1px solid #eee", borderRadius: 6, fontFamily: "monospace", fontSize: "0.9em", color: "#444" }}>
+                                                    {result.message}
+                                                </div>
+                                            )}
                                             {Array.isArray(result.results) && result.results.length > 0 ? (
                                                 (() => {
                                                     const rows = result.results;

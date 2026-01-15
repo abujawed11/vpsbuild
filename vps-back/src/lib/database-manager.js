@@ -578,35 +578,87 @@ async function executePostgresQuery(containerName, dbName, username, password, q
             `PGPASSWORD=${password}`,
             containerName,
             "psql",
+            "-X",
+            "-q",
             "-U",
             username,
             "-d",
             dbName,
+            "-v",
+            "ON_ERROR_STOP=1",
             "-c",
             query,
-            "-t",
             "-A",
             "-F",
             "\t",
+            "-P",
+            "footer=off",
           ],
           { timeout: 30000 }
         );
         const executionTime = Date.now() - startTime;
 
-        const lines = String(stdout || "").trim().split('\n').filter(l => l.trim());
+        const output = String(stdout || "").trim();
+        const lines = output ? output.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim()) : [];
 
-        // For simple queries, parse tab-separated output
-        const rows = lines.map(line => {
-            const values = line.split('\t');
-            return values;
+        const mayReturnRows =
+          /^\s*(SELECT|WITH|SHOW|TABLE|VALUES|EXPLAIN)\b/i.test(query || "") ||
+          (/\bRETURNING\b/i.test(query || "") && /^\s*(INSERT|UPDATE|DELETE)\b/i.test(query || ""));
+
+        // If it doesn't look like a row-returning query, treat psql output as a message.
+        if (!mayReturnRows) {
+          return {
+            success: true,
+            results: [],
+            fields: [],
+            rowCount: 0,
+            executionTime,
+            message: output || "OK",
+          };
+        }
+
+        if (lines.length === 0) {
+          return {
+            success: true,
+            results: [],
+            fields: [],
+            rowCount: 0,
+            executionTime,
+          };
+        }
+
+        // psql prints a header row even for 0-row SELECTs when tuples_only is off.
+        const headerLine = lines[0];
+        const headers = headerLine.split("\t").map((h) => h.trim());
+        const colCount = headers.length;
+
+        // Drop status line like "INSERT 0 1" if present (common with RETURNING).
+        let dataLines = lines.slice(1);
+        if (dataLines.length > 0) {
+          const last = dataLines[dataLines.length - 1];
+          const lastCols = last.split("\t").length;
+          const looksLikeStatus = /^(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|GRANT|REVOKE|TRUNCATE|COPY|EXPLAIN|SHOW)\b/i.test(last);
+          if (looksLikeStatus || lastCols !== colCount) {
+            dataLines = dataLines.slice(0, -1);
+          }
+        }
+
+        const fields = headers.map((name) => ({ name, type: "unknown" }));
+        const results = dataLines.map((line) => {
+          const values = line.split("\t");
+          const row = {};
+          for (let i = 0; i < headers.length; i++) {
+            row[headers[i]] = values[i] === "NULL" ? null : (values[i] ?? "");
+          }
+          return row;
         });
 
         return {
-            success: true,
-            results: rows,
-            fields: [],
-            rowCount: rows.length,
-            executionTime
+          success: true,
+          results,
+          fields,
+          rowCount: results.length,
+          executionTime,
         };
     } catch (err) {
         return {
