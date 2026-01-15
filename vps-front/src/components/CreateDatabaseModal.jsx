@@ -1,16 +1,21 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 
 export default function CreateDatabaseModal({ onClose, onCreated }) {
+    const nav = useNavigate();
     const [name, setName] = useState("");
     const [type, setType] = useState("MYSQL");
     const [projectId, setProjectId] = useState("");
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [failedDbId, setFailedDbId] = useState("");
     const [createdDb, setCreatedDb] = useState(null);
     const [copied, setCopied] = useState("");
+    const [redeploying, setRedeploying] = useState(false);
+    const [redeployMsg, setRedeployMsg] = useState("");
 
     useEffect(() => {
         // Fetch available projects for linking
@@ -31,6 +36,7 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
 
         setLoading(true);
         setError("");
+        setFailedDbId("");
 
         try {
             const result = await apiFetch("/databases", {
@@ -43,9 +49,14 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                 }
             });
 
-            setCreatedDb(result.database);
+            setCreatedDb({
+                ...result.database,
+                linkedProjectId: result.linkedProjectId || projectId || null,
+                redeployRecommended: Boolean(result.redeployRecommended)
+            });
         } catch (e) {
             setError(e.message);
+            setFailedDbId(e?.data?.databaseId || "");
         } finally {
             setLoading(false);
         }
@@ -59,7 +70,13 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
 
     const downloadEnv = () => {
         if (!createdDb) return;
-        const content = `DATABASE_URL=${createdDb.connectionUrl}\nDB_HOST=${createdDb.host}\nDB_PORT=${createdDb.port}\nDB_NAME=${createdDb.dbName}\nDB_USER=${createdDb.username}\nDB_PASSWORD=${createdDb.password}\n`;
+        const urlLines =
+            createdDb.type === "MONGODB"
+                ? `MONGO_URL=${createdDb.connectionUrl}\nDATABASE_URL=${createdDb.connectionUrl}\n`
+                : `DATABASE_URL=${createdDb.connectionUrl}\n`;
+        const content =
+            urlLines +
+            `DB_HOST=${createdDb.host}\nDB_PORT=${createdDb.port}\nDB_NAME=${createdDb.dbName}\nDB_USER=${createdDb.username}\nDB_PASSWORD=${createdDb.password}\n`;
         const blob = new Blob([content], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -71,6 +88,10 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
 
     // Success screen after creation
     if (createdDb) {
+        const linkedProject = createdDb.linkedProjectId
+            ? projects.find(p => p.id === createdDb.linkedProjectId)
+            : null;
+
         return (
             <div style={{
                 position: "fixed",
@@ -114,6 +135,56 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                             You won't be able to see the password again after closing this window.
                         </p>
                     </div>
+
+                    {createdDb.linkedProjectId && (
+                        <div style={{
+                            background: "#e3f2fd",
+                            border: "1px solid #90caf9",
+                            borderRadius: 8,
+                            padding: 12,
+                            marginBottom: 16
+                        }}>
+                            <strong style={{ color: "#1565c0" }}>Linked to project</strong>
+                            <div style={{ marginTop: 6, color: "#1565c0", fontSize: "0.9em" }}>
+                                {linkedProject ? linkedProject.name : createdDb.linkedProjectId} (env vars updated)
+                            </div>
+                            <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
+                                <button
+                                    disabled={redeploying}
+                                    onClick={async () => {
+                                        setRedeploying(true);
+                                        setRedeployMsg("");
+                                        try {
+                                            const r = await apiFetch(`/deployments/${createdDb.linkedProjectId}/redeploy`, {
+                                                method: "POST",
+                                                token: getToken()
+                                            });
+                                            setRedeployMsg(`Redeploy queued (deploymentId: ${r.deploymentId})`);
+                                        } catch (e) {
+                                            setRedeployMsg(e.message);
+                                        } finally {
+                                            setRedeploying(false);
+                                        }
+                                    }}
+                                    style={{
+                                        background: redeploying ? "#90caf9" : "#2196F3",
+                                        color: "white",
+                                        padding: "8px 14px",
+                                        borderRadius: 6,
+                                        border: "none",
+                                        cursor: redeploying ? "default" : "pointer"
+                                    }}
+                                >
+                                    {redeploying ? "Redeploying..." : "Redeploy now"}
+                                </button>
+                                {redeployMsg && (
+                                    <div style={{ fontSize: "0.85em", color: redeployMsg.startsWith("Redeploy queued") ? "#2e7d32" : "#c62828" }}>
+                                        {redeployMsg}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     <div style={{ marginBottom: 16 }}>
                         <label style={{ display: "block", fontSize: "0.85em", color: "#666", marginBottom: 4 }}>
@@ -289,7 +360,27 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                         marginBottom: 16,
                         fontSize: "0.9em"
                     }}>
-                        {error}
+                        <div>{error}</div>
+                        {failedDbId && (
+                            <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                                <button
+                                    onClick={() => {
+                                        onClose();
+                                        nav(`/databases/${failedDbId}`);
+                                    }}
+                                    style={{
+                                        background: "#c62828",
+                                        color: "white",
+                                        padding: "8px 12px",
+                                        borderRadius: 6,
+                                        border: "none",
+                                        cursor: "pointer"
+                                    }}
+                                >
+                                    View provisioning logs
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -369,6 +460,9 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                     </select>
                     <p style={{ fontSize: "0.8em", color: "#666", margin: "8px 0 0 0" }}>
                         Linking adds DATABASE_URL to project's environment variables.
+                    </p>
+                    <p style={{ fontSize: "0.8em", color: "#666", margin: "6px 0 0 0" }}>
+                        Credentials are generated automatically. Password is shown once after creation.
                     </p>
                 </div>
 

@@ -452,7 +452,8 @@ async function runServerDeploy(project, deploymentId) {
         // Run container WITHOUT port publishing
         // Add host.docker.internal to allow containers to access host services (like MySQL on host)
         await updateLogs("=== STARTING CONTAINER ===");
-        const runCmd = `docker run -d --name ${project.slug} --restart unless-stopped --add-host=host.docker.internal:host-gateway --memory="512m" --cpus="1.0" ${nodeEnv} ${portEnv} ${envFlags} ${imageTag}`;
+        const runNetwork = process.env.GATEWAY_NETWORK || "vpsbuilds_default";
+        const runCmd = `docker run -d --name ${project.slug} --network ${runNetwork} --restart unless-stopped --add-host=host.docker.internal:host-gateway --memory="512m" --cpus="1.0" ${nodeEnv} ${portEnv} ${envFlags} ${imageTag}`;
 
         try {
             await execPromise(runCmd, { timeout: 30000 });

@@ -24,7 +24,7 @@ export default function Databases() {
                 setUser(d.user);
                 fetchDatabases();
             })
-            .catch((e) => {
+            .catch(() => {
                 clearToken();
                 nav("/login");
             });
@@ -56,23 +56,7 @@ export default function Databases() {
         }
     };
 
-    const handleDelete = async (db) => {
-        if (!window.confirm(`Are you sure you want to delete "${db.name}"? This action cannot be undone and all data will be lost.`)) {
-            return;
-        }
-        setActionLoading(`${db.id}-delete`);
-        try {
-            await apiFetch(`/databases/${db.id}`, {
-                method: "DELETE",
-                token: getToken()
-            });
-            await fetchDatabases();
-        } catch (e) {
-            alert(e.message);
-        } finally {
-            setActionLoading(null);
-        }
-    };
+    // Destructive actions live in the Database Settings tab.
 
     const logout = () => {
         clearToken();
@@ -84,6 +68,7 @@ export default function Databases() {
             case 'RUNNING': return '#4caf50';
             case 'STOPPED': return '#ff9800';
             case 'CREATING': return '#2196F3';
+            case 'ERROR': return '#f44336';
             case 'FAILED': return '#f44336';
             case 'DELETING': return '#9e9e9e';
             default: return '#9e9e9e';
@@ -284,20 +269,7 @@ export default function Databases() {
                                     </button>
                                 )}
 
-                                <button
-                                    onClick={() => handleDelete(db)}
-                                    style={{
-                                        background: "#f44336",
-                                        color: "white",
-                                        padding: "8px 12px",
-                                        borderRadius: 6,
-                                        border: "none",
-                                        cursor: "pointer",
-                                        fontSize: "0.85em"
-                                    }}
-                                >
-                                    Delete
-                                </button>
+                                {/* Delete lives in Settings */}
                             </div>
                         </div>
                     ))}
@@ -307,7 +279,7 @@ export default function Databases() {
             {showCreateModal && (
                 <CreateDatabaseModal
                     onClose={() => setShowCreateModal(false)}
-                    onCreated={(newDb) => {
+                    onCreated={() => {
                         setShowCreateModal(false);
                         fetchDatabases();
                     }}

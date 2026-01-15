@@ -146,6 +146,7 @@ enum DatabaseStatus {
   CREATING
   RUNNING
   STOPPED
+  ERROR
   FAILED
   DELETING
 }
@@ -162,9 +163,9 @@ model Database {
 
   // Database Credentials
   dbName        String   // Database name inside container
-  username      String   // Database username
-  password      String   // Encrypted password
-  rootPassword  String   // Root/admin password (encrypted)
+  dbUsername          String   @map("username") // Dedicated app user (unique per DB instance)
+  dbPasswordEncrypted String   @map("password") // Encrypted at rest (may be plaintext for legacy rows)
+  rootPasswordEncrypted String @map("rootPassword") // Encrypted at rest (never exposed to user)
 
   // Connection Details
   host          String   // Container name (for internal connections)
@@ -174,6 +175,12 @@ model Database {
   status        DatabaseStatus @default(CREATING)
   volumeName    String   // Docker volume name for persistence
   diskUsageMB   Int      @default(0) // Storage used in MB
+  linkedProjectId String? // Optional denormalized link (keep in sync with Project.databaseId)
+
+  // Provisioning / Error Diagnostics
+  lastError         String?
+  lastProvisionLog  String?
+  provisioningLog   Json?
 
   // Relationships
   project       Project?

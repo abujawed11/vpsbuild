@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
-import { clearToken, getToken } from "../lib/auth";
+import { getToken } from "../lib/auth";
 import SqlEditor from "../components/SqlEditor";
+import OneTimeSecretModal from "../components/OneTimeSecretModal";
+import DangerConfirmModal from "../components/DangerConfirmModal";
 
 export default function DatabaseManagement() {
     const { id } = useParams();
@@ -12,6 +14,10 @@ export default function DatabaseManagement() {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState("overview");
     const [actionLoading, setActionLoading] = useState(false);
+    const [oneTimeSecret, setOneTimeSecret] = useState(null);
+    const [showResetDbModal, setShowResetDbModal] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [dangerLoading, setDangerLoading] = useState(false);
 
     // Query Editor state
     const [query, setQuery] = useState("");
@@ -108,22 +114,7 @@ export default function DatabaseManagement() {
         }
     };
 
-    const handleDelete = async () => {
-        if (!window.confirm(`Are you sure you want to delete "${database.name}"? This will permanently delete all data.`)) {
-            return;
-        }
-        setActionLoading(true);
-        try {
-            await apiFetch(`/databases/${id}`, {
-                method: "DELETE",
-                token: getToken()
-            });
-            nav("/databases");
-        } catch (e) {
-            alert(e.message);
-            setActionLoading(false);
-        }
-    };
+    const handleDelete = () => setShowDeleteModal(true);
 
     const handleResetPassword = async () => {
         if (!window.confirm("This will generate a new password. Make sure to save it!")) {
@@ -135,7 +126,14 @@ export default function DatabaseManagement() {
                 method: "POST",
                 token: getToken()
             });
-            alert(`New password: ${res.password}\n\nNew connection URL:\n${res.connectionUrl}`);
+            setOneTimeSecret({
+                title: "Password reset",
+                subtitle: "Update your app env vars and redeploy if needed.",
+                secrets: [
+                    { key: "connectionUrl", label: "Connection URL", value: res.connectionUrl },
+                    { key: "password", label: "Password", value: res.password, highlight: true }
+                ]
+            });
             await fetchDatabase();
         } catch (e) {
             alert(e.message);
@@ -148,11 +146,21 @@ export default function DatabaseManagement() {
         if (!selectedProjectId) return;
         setActionLoading(true);
         try {
-            await apiFetch(`/databases/${id}/link-project`, {
+            const linkRes = await apiFetch(`/databases/${id}/link-project`, {
                 method: "POST",
                 token: getToken(),
                 body: { projectId: selectedProjectId }
             });
+
+            if (linkRes?.redeployRecommended) {
+                const ok = window.confirm("Env vars were added to the project. Redeploy now?");
+                if (ok) {
+                    await apiFetch(`/deployments/${selectedProjectId}/redeploy`, {
+                        method: "POST",
+                        token: getToken()
+                    });
+                }
+            }
             setSelectedProjectId("");
             await fetchDatabase();
             await fetchProjects();
@@ -327,6 +335,7 @@ export default function DatabaseManagement() {
             case 'RUNNING': return '#4caf50';
             case 'STOPPED': return '#ff9800';
             case 'CREATING': return '#2196F3';
+            case 'ERROR': return '#f44336';
             case 'FAILED': return '#f44336';
             default: return '#9e9e9e';
         }
@@ -430,6 +439,41 @@ export default function DatabaseManagement() {
             {/* Tab Content */}
             {activeTab === "overview" && (
                 <div>
+                    {(database.status === "ERROR" || database.status === "FAILED") && (
+                        <div style={{ background: "#fff5f5", borderRadius: 8, padding: 20, border: "1px solid #ffcdd2", marginBottom: 20 }}>
+                            <h3 style={{ margin: "0 0 10px 0", color: "#c62828" }}>Provisioning failed</h3>
+                            {database.lastError ? (
+                                <div style={{ fontFamily: "monospace", fontSize: "0.85em", whiteSpace: "pre-wrap", color: "#c62828" }}>
+                                    {database.lastError}
+                                </div>
+                            ) : (
+                                <div style={{ color: "#c62828" }}>No error details available.</div>
+                            )}
+
+                            {Array.isArray(database.provisioningLog) && database.provisioningLog.length > 0 && (
+                                <div style={{ marginTop: 14 }}>
+                                    <div style={{ fontWeight: 600, marginBottom: 8, color: "#c62828" }}>Provisioning steps</div>
+                                    <div style={{ display: "grid", gap: 6 }}>
+                                        {database.provisioningLog.map((s, idx) => (
+                                            <div key={idx} style={{ background: "white", border: "1px solid #ffe0e0", borderRadius: 6, padding: "8px 10px" }}>
+                                                <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                                                    <div style={{ fontFamily: "monospace", fontSize: "0.85em" }}>{s.step}</div>
+                                                    <div style={{ fontSize: "0.85em", color: s.status === "SUCCESS" ? "#2e7d32" : s.status === "FAILED" ? "#c62828" : "#666" }}>
+                                                        {s.status}
+                                                    </div>
+                                                </div>
+                                                {s.message ? (
+                                                    <div style={{ marginTop: 6, fontFamily: "monospace", fontSize: "0.8em", color: "#c62828", whiteSpace: "pre-wrap" }}>
+                                                        {s.message}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {/* Connection Details */}
                     <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20, marginBottom: 20 }}>
                         <h3 style={{ margin: "0 0 16px 0" }}>Connection Details</h3>
@@ -744,15 +788,89 @@ export default function DatabaseManagement() {
                     {/* Danger Zone */}
                     <div style={{ background: "#fff5f5", borderRadius: 8, padding: 20, border: "1px solid #ffcdd2" }}>
                         <h3 style={{ margin: "0 0 16px 0", color: "#c62828" }}>Danger Zone</h3>
+                        <button
+                            onClick={() => setShowResetDbModal(true)}
+                            disabled={actionLoading}
+                            style={{ background: "#d32f2f", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer", marginRight: 10 }}
+                        >
+                            Reset Database (wipe data)
+                        </button>
                         <button onClick={handleDelete} disabled={actionLoading} style={{ background: "#f44336", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
                             🗑️ Delete Database
                         </button>
                         <p style={{ fontSize: "0.85em", color: "#c62828", margin: "10px 0 0 0" }}>
-                            This action cannot be undone. All data will be permanently deleted.
+                            Reset wipes all data but keeps the same credentials. Delete removes the container + volume permanently.
                         </p>
                     </div>
                 </div>
             )}
+
+            {oneTimeSecret ? (
+                <OneTimeSecretModal
+                    title={oneTimeSecret.title}
+                    subtitle={oneTimeSecret.subtitle}
+                    secrets={oneTimeSecret.secrets}
+                    onClose={() => setOneTimeSecret(null)}
+                />
+            ) : null}
+
+            {showResetDbModal ? (
+                <DangerConfirmModal
+                    title="Reset database"
+                    description="This wipes all data in this database. Credentials remain the same."
+                    expectedName={database.name}
+                    expectedPhrase="I understand data will be lost"
+                    confirmText="Reset database"
+                    loading={dangerLoading}
+                    onClose={() => setShowResetDbModal(false)}
+                    onConfirm={async () => {
+                        setDangerLoading(true);
+                        try {
+                            await apiFetch(`/databases/${id}/reset`, {
+                                method: "POST",
+                                token: getToken(),
+                                body: {
+                                    confirmName: database.name,
+                                    confirmPhrase: "I understand data will be lost"
+                                }
+                            });
+                            setShowResetDbModal(false);
+                            await fetchDatabase();
+                            alert("Database reset successfully.");
+                        } catch (e) {
+                            alert(e.message);
+                        } finally {
+                            setDangerLoading(false);
+                        }
+                    }}
+                />
+            ) : null}
+
+            {showDeleteModal ? (
+                <DangerConfirmModal
+                    title="Delete database"
+                    description="This permanently deletes the container and volume. This cannot be undone."
+                    expectedName={database.name}
+                    expectedPhrase="DELETE"
+                    confirmText="Delete database"
+                    loading={dangerLoading}
+                    onClose={() => setShowDeleteModal(false)}
+                    onConfirm={async () => {
+                        setDangerLoading(true);
+                        try {
+                            await apiFetch(`/databases/${id}`, {
+                                method: "DELETE",
+                                token: getToken()
+                            });
+                            nav("/databases");
+                        } catch (e) {
+                            alert(e.message);
+                        } finally {
+                            setDangerLoading(false);
+                        }
+                    }}
+                />
+            ) : null}
         </div>
     );
 }
