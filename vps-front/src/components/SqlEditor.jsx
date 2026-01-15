@@ -1,8 +1,13 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Editor from '@monaco-editor/react';
 
 const STORAGE_KEY_LIMIT = 'vps_sql_limit';
 const STORAGE_KEY_HISTORY = 'vps_sql_history';
+const STORAGE_KEY_AUTOLIMIT = 'vps_sql_autolimit';
+
+function normalizeDialect(dialect) {
+    return dialect === "postgres" ? "postgres" : "mysql";
+}
 
 function getStatementAtCursor(text, cursorPosition) {
     const statements = [];
@@ -51,28 +56,45 @@ function getStatementAtCursor(text, cursorPosition) {
     return statements.find(s => cursorPosition >= s.start && cursorPosition <= s.end);
 }
 
-export default function SqlEditor({ defaultValue = "", onChange, onExecute, onExecuteAll, isLoading }) {
+export default function SqlEditor({ defaultValue = "", onChange, onExecute, onExecuteAll, isLoading, dialect }) {
+    const dbDialect = useMemo(() => normalizeDialect(dialect), [dialect]);
+    const storageLimitKey = `${STORAGE_KEY_LIMIT}_${dbDialect}`;
+    const storageHistoryKey = `${STORAGE_KEY_HISTORY}_${dbDialect}`;
+    const storageAutoLimitKey = `${STORAGE_KEY_AUTOLIMIT}_${dbDialect}`;
+
     const [value, setValue] = useState(defaultValue);
-    const [limit, setLimit] = useState(() => localStorage.getItem(STORAGE_KEY_LIMIT) || "1000");
+    const [limit, setLimit] = useState(() => localStorage.getItem(storageLimitKey) || "1000");
+    const [autoLimit, setAutoLimit] = useState(() => {
+        const stored = localStorage.getItem(storageAutoLimitKey);
+        if (stored === "true") return true;
+        if (stored === "false") return false;
+        return dbDialect !== "postgres";
+    });
     const [history, setHistory] = useState(() => {
         try {
-            return JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY) || "[]");
+            return JSON.parse(localStorage.getItem(storageHistoryKey) || "[]");
         } catch {
             return [];
         }
     });
     const editorRef = useRef(null);
     const monacoRef = useRef(null);
+    const executeRef = useRef(null);
 
     // Persist limit
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY_LIMIT, limit);
-    }, [limit]);
+        localStorage.setItem(storageLimitKey, limit);
+    }, [limit, storageLimitKey]);
+
+    // Persist autoLimit
+    useEffect(() => {
+        localStorage.setItem(storageAutoLimitKey, String(autoLimit));
+    }, [autoLimit, storageAutoLimitKey]);
 
     // Persist history
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(history));
-    }, [history]);
+        localStorage.setItem(storageHistoryKey, JSON.stringify(history));
+    }, [history, storageHistoryKey]);
 
     const addToHistory = (query) => {
         if (!query) return;
@@ -88,11 +110,12 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
 
         // Add custom keybinding for Ctrl+Enter
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-            handleExecute();
+            executeRef.current?.();
         });
     };
 
     const getQueryWithLimit = (sql) => {
+        if (!autoLimit) return sql;
         if (limit === "No limit") return sql;
         
         const limitVal = parseInt(limit, 10);
@@ -100,7 +123,7 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
 
         // Only append limit to SELECT queries
         const trimmedSql = sql.trim();
-        if (!/^SELECT\b/i.test(trimmedSql)) {
+        if (!/^(SELECT|WITH)\b/i.test(trimmedSql)) {
             return sql;
         }
 
@@ -114,7 +137,7 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
         return sql;
     };
 
-    const handleExecute = () => {
+    const handleExecute = useCallback(() => {
         if (!editorRef.current || !onExecute) return;
         
         const model = editorRef.current.getModel();
@@ -136,9 +159,13 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
                  onExecute(finalQuery);
              }
         }
-    };
+    }, [onExecute, autoLimit, limit, dbDialect]);
 
-    const handleExecuteAll = () => {
+    useEffect(() => {
+        executeRef.current = handleExecute;
+    }, [handleExecute]);
+
+    const handleExecuteAll = useCallback(() => {
         if (!editorRef.current || !onExecute) return; // Note: onExecute can handle multiple or we use onExecuteAll prop
         
         const text = editorRef.current.getValue();
@@ -195,6 +222,48 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
                  onExecute(finalQueries[0]);
              }
         }
+    }, [onExecute, onExecuteAll, autoLimit, limit, dbDialect]);
+
+    const insertSnippet = (snippet) => {
+        if (!editorRef.current) return;
+        const model = editorRef.current.getModel();
+        const currentVal = model.getValue();
+        const newVal = currentVal ? currentVal + "\n\n" + snippet : snippet;
+        editorRef.current.setValue(newVal);
+        setValue(newVal);
+        if (onChange) onChange(newVal);
+    };
+
+    const postgresSnippets = [
+        {
+            label: "List schemas",
+            sql: "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name;",
+        },
+        {
+            label: "List tables (public)",
+            sql: "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;",
+        },
+        {
+            label: "Describe table columns (replace table_name)",
+            sql: "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'table_name' ORDER BY ordinal_position;",
+        },
+        {
+            label: "List indexes (public)",
+            sql: "SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' ORDER BY tablename, indexname;",
+        },
+        {
+            label: "Prisma migration status",
+            sql: "SELECT migration_name, started_at, finished_at, rolled_back_at, applied_steps_count, logs FROM _prisma_migrations ORDER BY started_at DESC;",
+        },
+    ];
+
+    const handleExplainAnalyze = () => {
+        if (!editorRef.current || !onExecute) return;
+        const text = editorRef.current.getValue();
+        if (!text.trim()) return;
+        const explain = `EXPLAIN (ANALYZE, BUFFERS, VERBOSE) ${text.trim().replace(/;+\s*$/, "")};`;
+        addToHistory(explain);
+        onExecute(explain);
     };
 
     const handleClear = () => {
@@ -240,6 +309,16 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
                     >
                         Execute All
                     </button>
+                    {dbDialect === "postgres" && (
+                        <button
+                            onClick={handleExplainAnalyze}
+                            disabled={isLoading}
+                            title="EXPLAIN (ANALYZE, BUFFERS, VERBOSE) for the current editor content"
+                            style={{ background: "#673ab7", color: "white", border: "none", borderRadius: 4, padding: "6px 12px", cursor: "pointer", fontSize: "0.9em" }}
+                        >
+                            Explain Analyze
+                        </button>
+                    )}
                     <button 
                         onClick={handleClear}
                         style={{ background: "white", color: "#666", border: "1px solid #ddd", borderRadius: 4, padding: "6px 12px", cursor: "pointer", fontSize: "0.9em" }}
@@ -259,8 +338,33 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
                          </select>
                     </div>
 
+                    {dbDialect === "postgres" && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.9em", color: "#666" }}>
+                            <label>Snippets:</label>
+                            <select
+                                onChange={(e) => {
+                                    if (e.target.value === "") return;
+                                    const idx = Number(e.target.value);
+                                    if (!Number.isFinite(idx)) return;
+                                    const snippet = postgresSnippets[idx];
+                                    if (snippet?.sql) insertSnippet(snippet.sql);
+                                    e.target.value = "";
+                                }}
+                                style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #ddd", maxWidth: 180 }}
+                            >
+                                <option value="">Insert...</option>
+                                {postgresSnippets.map((s, i) => (
+                                    <option key={s.label} value={i}>{s.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.9em", color: "#666" }}>
-                        <label>Limit:</label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <input type="checkbox" checked={autoLimit} onChange={(e) => setAutoLimit(e.target.checked)} />
+                            Auto LIMIT
+                        </label>
                         <select 
                             value={limit} 
                             onChange={(e) => setLimit(e.target.value)}

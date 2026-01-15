@@ -572,6 +572,7 @@ export default function DatabaseManagement() {
                             onExecute={executeSingleQuery}
                             onExecuteAll={executeMultipleQueries}
                             isLoading={queryLoading}
+                            dialect={database.type === "POSTGRES" ? "postgres" : "mysql"}
                         />
                     </div>
 
@@ -598,7 +599,7 @@ export default function DatabaseManagement() {
                                 </div>
                             ) : (
                                 <div>
-                                    {result.fields && result.fields.length > 0 && (
+                                    {result.fields && result.fields.length > 0 ? (
                                         <>
                                             <div style={{ overflowX: "auto", maxHeight: 400 }}>
                                                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
@@ -650,6 +651,70 @@ export default function DatabaseManagement() {
                                                 </div>
                                             )}
                                         </>
+                                    ) : (
+                                        <div style={{ padding: 16 }}>
+                                            {Array.isArray(result.results) && result.results.length > 0 ? (
+                                                (() => {
+                                                    const rows = result.results;
+                                                    const firstRow = rows[0];
+                                                    const isArrayRows = Array.isArray(firstRow);
+
+                                                    if (isArrayRows) {
+                                                        const colCount = rows.reduce((max, row) => (
+                                                            Array.isArray(row) ? Math.max(max, row.length) : max
+                                                        ), 0);
+
+                                                        const isMultiColumn = colCount > 1;
+
+                                                        if (isMultiColumn) {
+                                                            const headers = Array.from({ length: colCount }, (_, i) => `col${i + 1}`);
+                                                            return (
+                                                                <div style={{ overflowX: "auto", maxHeight: 400 }}>
+                                                                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
+                                                                        <thead style={{ position: "sticky", top: 0, background: "white", zIndex: 1 }}>
+                                                                            <tr style={{ background: "#f9f9f9", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>
+                                                                                {headers.map((h) => (
+                                                                                    <th key={h} style={{ padding: "10px 12px", textAlign: "left", borderBottom: "1px solid #e0e0e0", whiteSpace: "nowrap" }}>
+                                                                                        {h}
+                                                                                    </th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {rows.map((row, i) => (
+                                                                                <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                                                                                    {headers.map((_, j) => (
+                                                                                        <td key={j} style={{ padding: "8px 12px", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                                                                                            {row?.[j] === null ? <span style={{ color: "#999" }}>NULL</span> : String(row?.[j] ?? "")}
+                                                                                        </td>
+                                                                                    ))}
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            );
+                                                        }
+
+                                                        return (
+                                                            <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "0.9em", color: "#444" }}>
+                                                                {rows.map((r) => (Array.isArray(r) ? r.join("\t") : String(r))).join("\n")}
+                                                            </pre>
+                                                        );
+                                                    }
+
+                                                    return (
+                                                        <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "0.9em", color: "#444" }}>
+                                                            {JSON.stringify(rows, null, 2)}
+                                                        </pre>
+                                                    );
+                                                })()
+                                            ) : (
+                                                <div style={{ padding: "20px", textAlign: "center", color: "#999" }}>
+                                                    Command executed (no rows returned)
+                                                </div>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             )}
