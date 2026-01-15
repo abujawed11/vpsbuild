@@ -495,13 +495,45 @@ async function getTableSchema(containerName, type, dbName, tableName, username, 
             cmd = `docker exec ${containerName} mysql -u${username} -p'${password}' ${dbName} -e 'DESCRIBE ${tableName};' --batch --raw`;
             break;
         case 'POSTGRES':
-            cmd = `docker exec -e PGPASSWORD='${password}' ${containerName} psql -U ${username} -d ${dbName} -c "\\d ${tableName}" -t -A`;
+            cmd = `docker exec -e PGPASSWORD='${password}' ${containerName} psql -U ${username} -d ${dbName} -c "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = '${tableName}' ORDER BY ordinal_position;" -t -A -F '\t'`;
             break;
     }
 
     try {
         const { stdout } = await execPromise(cmd, { timeout: 10000 });
-        return { schema: stdout.trim() };
+        const lines = stdout.trim().split('\n').filter(l => l.trim());
+
+        let columns = [];
+
+        if (type === 'MYSQL') {
+            // MySQL DESCRIBE format: Field, Type, Null, Key, Default, Extra
+            // First line is header, skip it
+            const dataLines = lines.slice(1);
+            columns = dataLines.map(line => {
+                const parts = line.split('\t');
+                return {
+                    name: parts[0] || '',
+                    type: parts[1] || '',
+                    nullable: parts[2] === 'YES',
+                    key: parts[3] || null,
+                    default: parts[4] === 'NULL' ? null : parts[4],
+                    extra: parts[5] || ''
+                };
+            });
+        } else if (type === 'POSTGRES') {
+            // PostgreSQL format: column_name, data_type, is_nullable, column_default
+            columns = lines.map(line => {
+                const parts = line.split('\t');
+                return {
+                    name: parts[0] || '',
+                    type: parts[1] || '',
+                    nullable: parts[2] === 'YES',
+                    default: parts[3] || null
+                };
+            });
+        }
+
+        return { columns };
     } catch (err) {
         throw new Error(`Failed to get table schema: ${err.message}`);
     }

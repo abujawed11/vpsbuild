@@ -78,8 +78,16 @@ export default function DatabaseManagement() {
 
     const fetchTableData = async (tableName) => {
         try {
-            const res = await apiFetch(`/databases/${id}/tables/${tableName}/rows?limit=50`, { token: getToken() });
-            setTableData({ name: tableName, ...res });
+            // Fetch both schema and rows
+            const [schemaRes, rowsRes] = await Promise.all([
+                apiFetch(`/databases/${id}/tables/${tableName}`, { token: getToken() }),
+                apiFetch(`/databases/${id}/tables/${tableName}/rows?limit=50`, { token: getToken() })
+            ]);
+            setTableData({
+                name: tableName,
+                schema: schemaRes.schema,
+                ...rowsRes
+            });
         } catch (e) {
             console.error(e);
         }
@@ -445,7 +453,7 @@ export default function DatabaseManagement() {
                                     ✓ Query executed in {queryResult.executionTime}ms ({queryResult.rowCount} rows)
                                 </span>
                             </div>
-                            {queryResult.results.length > 0 && (
+                            {queryResult.fields && queryResult.fields.length > 0 && (
                                 <div style={{ overflowX: "auto", border: "1px solid #e0e0e0", borderRadius: 6 }}>
                                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
                                         <thead>
@@ -458,15 +466,23 @@ export default function DatabaseManagement() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {queryResult.results.map((row, i) => (
-                                                <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                                                    {queryResult.fields.map((f, j) => (
-                                                        <td key={j} style={{ padding: "8px 12px", fontFamily: "monospace" }}>
-                                                            {row[f.name] === null ? <span style={{ color: "#999" }}>NULL</span> : String(row[f.name])}
-                                                        </td>
-                                                    ))}
+                                            {queryResult.results.length > 0 ? (
+                                                queryResult.results.map((row, i) => (
+                                                    <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                                                        {queryResult.fields.map((f, j) => (
+                                                            <td key={j} style={{ padding: "8px 12px", fontFamily: "monospace" }}>
+                                                                {row[f.name] === null ? <span style={{ color: "#999" }}>NULL</span> : String(row[f.name])}
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                ))
+                                            ) : (
+                                                <tr>
+                                                    <td colSpan={queryResult.fields.length} style={{ padding: "20px", textAlign: "center", color: "#999" }}>
+                                                        No rows returned
+                                                    </td>
                                                 </tr>
-                                            ))}
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>
@@ -519,31 +535,42 @@ export default function DatabaseManagement() {
                                     <h2 style={{ margin: 0 }}>📋 {selectedTable}</h2>
                                     <button onClick={() => { setSelectedTable(null); setTableData(null); }} style={{ background: "none", border: "none", fontSize: "1.5em", cursor: "pointer", color: "#999" }}>×</button>
                                 </div>
-                                {tableData.rows && tableData.rows.length > 0 ? (
+                                {tableData.columns && tableData.columns.length > 0 ? (
                                     <div style={{ overflowX: "auto" }}>
                                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
                                             <thead>
                                                 <tr style={{ background: "#f5f5f5" }}>
-                                                    {Object.keys(tableData.rows[0]).map(col => (
-                                                        <th key={col} style={{ padding: "10px 12px", textAlign: "left", borderBottom: "1px solid #e0e0e0" }}>{col}</th>
+                                                    {tableData.columns.map(col => (
+                                                        <th key={col.name} style={{ padding: "10px 12px", textAlign: "left", borderBottom: "1px solid #e0e0e0" }}>
+                                                            <div>{col.name}</div>
+                                                            <div style={{ fontSize: "0.75em", color: "#888", fontWeight: "normal" }}>{col.type}</div>
+                                                        </th>
                                                     ))}
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {tableData.rows.map((row, i) => (
-                                                    <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                                                        {Object.values(row).map((val, j) => (
-                                                            <td key={j} style={{ padding: "8px 12px", fontFamily: "monospace" }}>
-                                                                {val === null ? <span style={{ color: "#999" }}>NULL</span> : String(val)}
-                                                            </td>
-                                                        ))}
+                                                {tableData.rows && tableData.rows.length > 0 ? (
+                                                    tableData.rows.map((row, i) => (
+                                                        <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                                                            {tableData.columns.map((col, j) => (
+                                                                <td key={j} style={{ padding: "8px 12px", fontFamily: "monospace" }}>
+                                                                    {row[col.name] === null ? <span style={{ color: "#999" }}>NULL</span> : String(row[col.name])}
+                                                                </td>
+                                                            ))}
+                                                        </tr>
+                                                    ))
+                                                ) : (
+                                                    <tr>
+                                                        <td colSpan={tableData.columns.length} style={{ padding: "20px", textAlign: "center", color: "#999" }}>
+                                                            No rows in this table
+                                                        </td>
                                                     </tr>
-                                                ))}
+                                                )}
                                             </tbody>
                                         </table>
                                     </div>
                                 ) : (
-                                    <p style={{ color: "#666" }}>No rows in this table.</p>
+                                    <p style={{ color: "#666" }}>Could not fetch table structure.</p>
                                 )}
                             </div>
                         </div>
