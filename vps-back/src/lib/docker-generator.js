@@ -60,14 +60,20 @@ RUN npx prisma generate
   }
 
   // Ensure server listens on 0.0.0.0
-  const wrappedStart = `export HOST=0.0.0.0 && ${startCommand}`;
+  const wrappedStart = `export HOST=0.0.0.0; ${startCommand}`;
 
   // If Prisma is detected, sync schema with db push (safer than migrate deploy for fresh DBs)
   // db push syncs schema without migration history - perfect for Netlify-style deployments
   // Use || true to continue even if push fails (DB might be unreachable)
   const startupCmd = hasPrisma
-    ? `(npx prisma db push --skip-generate --accept-data-loss && npx prisma generate) || echo "Warning: Prisma db push/generate failed, starting app anyway..."; ${wrappedStart}`
+    ? `(npx prisma db push --skip-generate && npx prisma generate) || echo 'Warning: Prisma db push/generate failed, starting app anyway...'; ${wrappedStart}`
     : wrappedStart;
+
+  const escapeForDockerJsonString = (value) =>
+    String(value)
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\r?\n/g, " ");
 
   return `FROM node:18-alpine
 
@@ -88,7 +94,7 @@ ENV HOST=0.0.0.0
 EXPOSE ${port}
 
 # Start (ensure binding to 0.0.0.0)
-CMD sh -c "${startupCmd}"
+CMD ["sh", "-lc", "${escapeForDockerJsonString(startupCmd)}"]
 `;
 }
 
