@@ -17,6 +17,7 @@ model User {
   github   GithubAccount?
   projects Project[]
   projectGroups ProjectGroup[]
+  databases Database[]
 }
 
 model GithubAccount {
@@ -91,6 +92,10 @@ model Project {
   deployments      Deployment[]
   envVars          EnvVar[]
 
+  // Database relation (optional 1:1)
+  database         Database? @relation(fields: [databaseId], references: [id], onDelete: SetNull)
+  databaseId       String?   @unique
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -129,4 +134,58 @@ enum DeployType {
 enum DockerfileSource {
   GENERATED
   USER_EDITED
+}
+
+enum DatabaseType {
+  MYSQL
+  POSTGRES
+  MONGODB
+}
+
+enum DatabaseStatus {
+  CREATING
+  RUNNING
+  STOPPED
+  FAILED
+  DELETING
+}
+
+model Database {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String   // User-friendly name (e.g., "My App Database")
+
+  // Technical Details
+  containerName String   @unique // Docker container name (e.g., "db-myapp-7x9k")
+  type          DatabaseType // MYSQL, POSTGRES, MONGODB
+  version       String   @default("8") // MySQL 8, Postgres 15, etc.
+
+  // Database Credentials
+  dbName        String   // Database name inside container
+  username      String   // Database username
+  password      String   // Encrypted password
+  rootPassword  String   // Root/admin password (encrypted)
+
+  // Connection Details
+  host          String   // Container name (for internal connections)
+  port          Int      // 3306 for MySQL, 5432 for Postgres, 27017 for MongoDB
+
+  // Status & Metadata
+  status        DatabaseStatus @default(CREATING)
+  volumeName    String   // Docker volume name for persistence
+  diskUsageMB   Int      @default(0) // Storage used in MB
+
+  // Relationships
+  project       Project?
+
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastAccessedAt DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([status])
 }

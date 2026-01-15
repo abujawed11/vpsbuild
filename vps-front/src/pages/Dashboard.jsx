@@ -129,6 +129,9 @@ export default function Dashboard() {
                         )}
                     </div>
 
+                    <button onClick={() => nav("/databases")} style={{ background: "#673ab7", color: "white", padding: "10px 20px", borderRadius: 6, border: "none", cursor: "pointer" }}>
+                        🗄️ Databases
+                    </button>
                     <button onClick={() => setShowCreateGroup(true)} style={{ background: "#2196F3", color: "white", padding: "10px 20px", borderRadius: 6, border: "none", cursor: "pointer" }}>
                         + Create Project
                     </button>
