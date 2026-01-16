@@ -57,6 +57,12 @@ router.post("/:projectId", authRequired, async (req, res) => {
             }
         });
 
+        // Update project status immediately so UI doesn't stay IDLE while queued
+        await prisma.project.update({
+            where: { id: project.id },
+            data: { deploymentStatus: "BUILDING" }
+        });
+
         // Trigger build process (async) - route based on deploy type
         if (project.deployType === "BACKEND") {
             runServerDeploy(project, deployment.id).catch(console.error);
@@ -148,6 +154,12 @@ router.post("/:projectId/redeploy", authRequired, async (req, res) => {
                 status: "QUEUED",
                 logs: "Redeployment queued..."
             }
+        });
+
+        // Update project status immediately so UI doesn't stay IDLE while queued
+        await prisma.project.update({
+            where: { id: project.id },
+            data: { deploymentStatus: "BUILDING" }
         });
 
         // Trigger build process (async) - route based on deploy type
@@ -255,6 +267,7 @@ async function runServerDeploy(project, deploymentId) {
         // PHASE 1: PREPARE DOCKERFILE
         // ============================================
         await prisma.deployment.update({ where: { id: deploymentId }, data: { status: "BUILDING" } });
+        await prisma.project.update({ where: { id: project.id }, data: { deploymentStatus: "BUILDING" } });
         await updateLogs("=== SERVER DEPLOYMENT ===");
         await updateLogs(`[INFO] Project: ${project.name}`);
         await updateLogs(`[INFO] Repository: ${project.repoFullName}`);
@@ -585,6 +598,7 @@ async function runServerDeploy(project, deploymentId) {
             where: { id: deploymentId },
             data: { status: "DEPLOYED", finishedAt: new Date() }
         });
+        await prisma.project.update({ where: { id: project.id }, data: { deploymentStatus: "DEPLOYED" } });
 
         await updateLogs("=== DEPLOYMENT COMPLETE ===");
 
@@ -603,6 +617,7 @@ async function runServerDeploy(project, deploymentId) {
             where: { id: deploymentId },
             data: { status: "FAILED", finishedAt: new Date() }
         });
+        await prisma.project.update({ where: { id: project.id }, data: { deploymentStatus: "FAILED" } });
     }
 }
 
@@ -621,6 +636,7 @@ async function runBuild(project, deploymentId) {
         // PHASE 1: BUILD
         // ============================================
         await prisma.deployment.update({ where: { id: deploymentId }, data: { status: "BUILDING" } });
+        await prisma.project.update({ where: { id: project.id }, data: { deploymentStatus: "BUILDING" } });
         await updateLogs("=== BUILD PHASE ===");
         await updateLogs(`[INFO] Project: ${project.name}`);
         await updateLogs(`[INFO] Repository: ${project.repoFullName}`);
@@ -861,6 +877,7 @@ async function runBuild(project, deploymentId) {
             where: { id: deploymentId },
             data: { status: "DEPLOYED", finishedAt: new Date() }
         });
+        await prisma.project.update({ where: { id: project.id }, data: { deploymentStatus: "DEPLOYED" } });
         await updateLogs("=== DEPLOYMENT COMPLETE ===");
 
         // Get base domain from environment (without protocol or port)
@@ -881,6 +898,7 @@ async function runBuild(project, deploymentId) {
             where: { id: deploymentId },
             data: { status: "FAILED", finishedAt: new Date() }
         });
+        await prisma.project.update({ where: { id: project.id }, data: { deploymentStatus: "FAILED" } });
     }
 }
 

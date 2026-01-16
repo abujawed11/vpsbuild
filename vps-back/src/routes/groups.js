@@ -7,6 +7,16 @@ const path = require("path");
 
 const router = express.Router();
 
+function deriveProjectDeploymentStatus(project) {
+    if (!project) return "IDLE";
+    const latestStatus = project.deployments?.[0]?.status;
+    if (!latestStatus) return project.deploymentStatus || "IDLE";
+    if (["QUEUED", "CLONING", "BUILDING", "FINALIZING"].includes(latestStatus)) return "BUILDING";
+    if (latestStatus === "DEPLOYED") return "DEPLOYED";
+    if (latestStatus === "FAILED") return "FAILED";
+    return project.deploymentStatus || latestStatus || "IDLE";
+}
+
 /**
  * Generate a URL-safe slug from a name
  * e.g., "My App Name" -> "my-app-name"
@@ -80,13 +90,13 @@ router.get("/", authRequired, async (req, res) => {
                 // Component details
                 frontend: frontend ? {
                     id: frontend.id,
-                    status: frontend.deploymentStatus,
+                    status: deriveProjectDeploymentStatus(frontend),
                     framework: frontend.framework,
                     latestDeployment: frontend.deployments[0] || null
                 } : null,
                 backend: backend ? {
                     id: backend.id,
-                    status: backend.deploymentStatus,
+                    status: deriveProjectDeploymentStatus(backend),
                     framework: backend.framework,
                     latestDeployment: backend.deployments[0] || null
                 } : null,
@@ -222,14 +232,29 @@ router.get("/:id", authRequired, async (req, res) => {
 
         const baseDomain = process.env.BASE_DOMAIN || '93.127.199.118.sslip.io';
 
+        const formatProject = (p) => {
+            if (!p) return null;
+            return {
+                ...p,
+                deploymentStatus: deriveProjectDeploymentStatus(p),
+                latestDeployment: p.deployments?.[0] || null,
+                hasDeployedVersion: Array.isArray(p.deployments) ? p.deployments.some(d => d.status === "DEPLOYED") : false
+            };
+        };
+
         res.json({
             ...group,
             url: `https://${group.slug}.${baseDomain}`,
             hasFrontend: !!frontend,
             hasBackend: !!backend,
             hasDatabase: !!group.database,
-            frontend: frontend || null,
-            backend: backend || null
+            frontend: formatProject(frontend),
+            backend: formatProject(backend),
+            databaseInfo: group.database ? {
+                id: group.database.id,
+                type: group.database.type,
+                status: group.database.status
+            } : null
         });
     } catch (err) {
         console.error(err);

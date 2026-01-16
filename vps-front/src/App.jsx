@@ -3,6 +3,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import GroupView from "./pages/GroupView";
+import Databases from "./pages/Databases";
 import DatabaseManagement from "./pages/DatabaseManagement";
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/groups/:groupId" element={<GroupView />} />
+        <Route path="/databases" element={<Databases />} />
         {/* Database management accessed from within project view */}
         <Route path="/databases/:id" element={<DatabaseManagement />} />
       </Routes>

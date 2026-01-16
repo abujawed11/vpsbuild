@@ -497,7 +497,7 @@ function DatabaseCard({ database, hasDatabase, databaseInfo, isDeleting, onAdd, 
         );
     }
 
-    const status = getStatusStyle(databaseInfo?.status);
+    const status = getStatusStyle(databaseInfo?.status || database?.status);
 
     return (
         <div style={{
