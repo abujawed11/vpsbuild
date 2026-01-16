@@ -588,10 +588,12 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     {/* Show project URL info when role is provided */}
                     {role && groupSlug && (
                         <div style={{ marginBottom: 25, padding: 12, background: "#f5f5f5", borderRadius: 8, border: "1px solid #ddd" }}>
-                            <label style={{ ...labelStyle, marginBottom: 8 }}>Project URL</label>
+                            <label style={{ ...labelStyle, marginBottom: 8 }}>Deployment URL</label>
                             <div style={{ fontFamily: "monospace", fontSize: "0.9em" }}>
-                                <span style={{ color: "#2196F3" }}>http://{groupSlug}.{baseDomain}{basePort}</span>
-                                <span style={{ color: "#666" }}>{role === "BACKEND" ? "/api/*" : "/"}</span>
+                                <span style={{ color: "#2196F3" }}>http://{groupSlug}-{role.toLowerCase()}.{baseDomain}{basePort}</span>
+                            </div>
+                            <div style={{ marginTop: 8, fontSize: "0.8em", color: "#666" }}>
+                                This will be accessible via the project URL: <code>{groupSlug}.{baseDomain}{basePort}{role === "BACKEND" ? "/api/*" : "/"}</code>
                             </div>
                         </div>
                     )}
@@ -1077,8 +1079,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     </div>
                     
                     {deployment?.status === "DEPLOYED" && (() => {
-                        // For role-based deployment, use groupSlug; otherwise use project slug
-                        const slug = role ? groupSlug : (projectData?.slug || siteSlug);
+                        // For role-based deployment, use projectData.slug (which is groupSlug-role)
+                        // For legacy, use siteSlug
+                        const slug = projectData?.slug || siteSlug;
                         const siteUrl = `http://${slug}.${baseDomain}${basePort}`;
                         const siteLabel = `${slug}.${baseDomain}${basePort}`;
 
@@ -1090,7 +1093,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                                     display: "inline-block", marginTop: 10, padding: "10px 20px",
                                     background: "#2e7d32", color: "white", textDecoration: "none", borderRadius: 6, fontWeight: "bold"
                                 }}>
-                                    Visit {siteLabel}{role === "BACKEND" ? "/api" : ""}
+                                    Visit {siteLabel}
                                 </a>
                                 <div style={{ marginTop: 15 }}>
                                     <button onClick={onComplete} style={{ background: "transparent", border: "none", textDecoration: "underline", cursor: "pointer", color: "#2e7d32" }}>Back to Project</button>
