@@ -53,20 +53,45 @@ router.get("/", authRequired, async (req, res) => {
 // POST /api/projects
 // Creates a project record (used by ZIP-upload flow before uploading the file)
 router.post("/", authRequired, async (req, res) => {
-    const { name, slug: customSlug, groupId, repoFullName, branch } = req.body;
+    const { name, slug: customSlug, groupId, repoFullName, branch, role } = req.body;
 
     if (!name) return res.status(400).json({ error: "Name is required" });
     if (!repoFullName) return res.status(400).json({ error: "repoFullName is required" });
 
-    const slug =
-        customSlug || name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 50);
+    // Validate role if provided
+    if (role && !['FRONTEND', 'BACKEND'].includes(role)) {
+        return res.status(400).json({ error: "Invalid role. Must be FRONTEND or BACKEND" });
+    }
+
+    let slug;
+    let group = null;
 
     try {
         if (groupId) {
-            const group = await prisma.projectGroup.findUnique({ where: { id: groupId } });
+            group = await prisma.projectGroup.findUnique({
+                where: { id: groupId },
+                include: { projects: true }
+            });
             if (!group || group.userId !== req.user.id) {
                 return res.status(400).json({ error: "Invalid groupId" });
             }
+
+            // If role is specified, check if one already exists for this group
+            if (role) {
+                const existingWithRole = group.projects.find(p => p.role === role);
+                if (existingWithRole) {
+                    return res.status(400).json({
+                        error: `A ${role.toLowerCase()} already exists for this project`,
+                        message: `Delete the existing ${role.toLowerCase()} first before adding a new one.`
+                    });
+                }
+            }
+
+            // Use group slug + role for container naming: myapp-frontend or myapp-backend
+            slug = role ? `${group.slug}-${role.toLowerCase()}` : (customSlug || name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 50));
+        } else {
+            // Legacy: standalone project without group
+            slug = customSlug || name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 50);
         }
 
         const project = await prisma.project.create({
@@ -75,14 +100,27 @@ router.post("/", authRequired, async (req, res) => {
                 name,
                 slug,
                 groupId: groupId || null,
+                role: role || null,
                 repoFullName,
                 branch: branch || "main"
             }
         });
 
-        res.json({ success: true, project });
+        res.json({
+            success: true,
+            project,
+            // Include group info if available
+            groupSlug: group?.slug || null,
+            containerName: slug
+        });
     } catch (err) {
         if (err?.code === "P2002") {
+            // Check which unique constraint was violated
+            if (err.meta?.target?.includes('groupId') && err.meta?.target?.includes('role')) {
+                return res.status(400).json({
+                    error: `A ${role?.toLowerCase() || 'component'} already exists for this project`
+                });
+            }
             return res.status(400).json({ error: "Project name or slug already exists" });
         }
         console.error("Project create failed:", err.message);

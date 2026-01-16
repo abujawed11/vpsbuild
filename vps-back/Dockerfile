@@ -27,4 +27,6 @@ RUN npx prisma generate
 COPY . .
 
 EXPOSE 5000
-CMD ["npm", "start"]
+
+# Run prisma db push on startup (applies schema changes), then start app
+CMD ["sh", "-c", "npx prisma db push --skip-generate && npm start"]

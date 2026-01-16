@@ -126,6 +126,8 @@ function sanitizeDatabase(db, { includeProvisioning = false } = {}) {
     return {
         id: db.id,
         userId: db.userId,
+        groupId: db.groupId || null,  // Project group link
+        group: db.group || null,      // Include group details if populated
         name: db.name,
         containerName: db.containerName,
         type: db.type,
@@ -229,24 +231,48 @@ router.get("/:id", authRequired, async (req, res) => {
 
 // POST /api/databases - Create new database
 router.post("/", authRequired, async (req, res) => {
-    const { name, type, projectId } = req.body;
-
-    if (!name) {
-        return res.status(400).json({ error: "Name is required" });
-    }
+    const { name, type, projectId, groupId } = req.body;
 
     if (!type || !['MYSQL', 'POSTGRES', 'MONGODB'].includes(type)) {
         return res.status(400).json({ error: "Valid database type is required (MYSQL, POSTGRES, MONGODB)" });
     }
 
     let createdDatabaseId = null;
+    let group = null;
+
     try {
-        const trimmedName = String(name).trim();
+        // If groupId provided, validate and use group slug for naming
+        if (groupId) {
+            group = await prisma.projectGroup.findUnique({
+                where: { id: groupId },
+                include: { database: true }
+            });
+
+            if (!group || group.userId !== req.user.id) {
+                return res.status(404).json({ error: "Project not found" });
+            }
+
+            // Check if group already has a database
+            if (group.database) {
+                return res.status(400).json({
+                    error: "Project already has a database",
+                    message: "Delete the existing database first before creating a new one."
+                });
+            }
+        }
+
+        // Use provided name, or auto-generate from group slug
+        const trimmedName = name ? String(name).trim() : (group ? `${group.slug}-db` : null);
+
+        if (!trimmedName) {
+            return res.status(400).json({ error: "Name is required (or provide groupId for auto-naming)" });
+        }
+
         if (trimmedName.length < 2 || trimmedName.length > 40) {
             return res.status(400).json({ error: "Name must be 2-40 characters" });
         }
 
-        // Check if project exists and belongs to user (if projectId provided)
+        // Legacy: Check if project exists and belongs to user (if projectId provided)
         if (projectId) {
             const project = await prisma.project.findUnique({
                 where: { id: projectId }
@@ -259,8 +285,10 @@ router.post("/", authRequired, async (req, res) => {
             }
         }
 
-        // Generate credentials
-        const containerName = generateContainerName(trimmedName);
+        // Generate credentials - use group slug for container name if available
+        const containerName = group
+            ? `${group.slug}-db`
+            : generateContainerName(trimmedName);
         const volumeName = `${containerName}-data`;
         let dbName = toSafeIdentifier(trimmedName, { maxLength: 32, fallback: "appdb" });
         let dbUsername = toSafeIdentifier(`u_${req.user.id.slice(0, 6)}_${generateShortId()}`, { maxLength: 32, fallback: "appuser" }).replace(/^[^a-zA-Z]+/, "u");
@@ -274,6 +302,7 @@ router.post("/", authRequired, async (req, res) => {
         const database = await prisma.database.create({
             data: {
                 userId: req.user.id,
+                groupId: groupId || null,  // Link to project group if provided
                 name: trimmedName,
                 containerName,
                 type,

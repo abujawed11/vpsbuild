@@ -33,15 +33,20 @@ model GithubAccount {
 }
 
 model ProjectGroup {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  name      String
-  projects  Project[]
+  name          String
+  slug          String   @unique  // Subdomain identifier (e.g., "my-app" -> my-app.domain.com)
+  apiPathPrefix String   @default("/api")  // Configurable API route prefix
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // Relations - max 1 frontend, 1 backend, 1 database per project
+  projects      Project[]
+  database      Database?  // Optional 1:1 relation to database
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([userId, name])
 }
@@ -50,9 +55,12 @@ model Project {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   groupId   String?
   group     ProjectGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  // Role within the project group (FRONTEND or BACKEND)
+  role      ProjectRole?
 
   name             String
   repoFullName     String   // e.g. "facebook/react"
@@ -100,6 +108,7 @@ model Project {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, name])
+  @@unique([groupId, role])  // Only one frontend and one backend per project group
 }
 
 model Deployment {
@@ -131,6 +140,11 @@ enum DeployType {
   FULLSTACK
 }
 
+enum ProjectRole {
+  FRONTEND
+  BACKEND
+}
+
 enum DockerfileSource {
   GENERATED
   USER_EDITED
@@ -153,8 +167,12 @@ enum DatabaseStatus {
 
 model Database {
   id            String   @id @default(cuid())
-  userId        String
+  userId        String   // Keep for backward compatibility and easy user-level queries
   name          String   // User-friendly name (e.g., "My App Database")
+
+  // Project Group relation (new: database belongs to a project group)
+  groupId       String?  @unique  // Optional for backward compat, unique = max 1 DB per group
+  group         ProjectGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   // Technical Details
   containerName String   @unique // Docker container name (e.g., "db-myapp-7x9k")
