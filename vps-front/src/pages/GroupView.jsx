@@ -6,26 +6,32 @@ import DeploymentWizard from "../components/DeploymentWizard";
 import EditEnvModal from "../components/EditEnvModal";
 import FileManagerModal from "../components/FileManagerModal";
 import ExecuteScriptModal from "../components/ExecuteScriptModal";
+import CreateDatabaseModal from "../components/CreateDatabaseModal";
+
+const BASE_DOMAIN = import.meta.env.VITE_BASE_DOMAIN || "93.127.199.118.sslip.io";
+const BASE_PORT = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
 
 export default function GroupView() {
     const { groupId } = useParams();
     const nav = useNavigate();
     const [group, setGroup] = useState(null);
-    const [projects, setProjects] = useState([]);
-    const [showWizard, setShowWizard] = useState(false);
     const [err, setErr] = useState("");
-    const [deletingProjectId, setDeletingProjectId] = useState(null);
-    const [openMenuId, setOpenMenuId] = useState(null);
+
+    // Wizard states
+    const [showWizard, setShowWizard] = useState(false);
+    const [wizardRole, setWizardRole] = useState(null); // 'FRONTEND' or 'BACKEND'
+    const [showDbModal, setShowDbModal] = useState(false);
+
+    // Action states
+    const [deletingComponent, setDeletingComponent] = useState(null); // 'frontend', 'backend', 'database'
+    const [redeployingComponent, setRedeployingComponent] = useState(null);
     const [editingEnvProjectId, setEditingEnvProjectId] = useState(null);
     const [managingFilesProjectId, setManagingFilesProjectId] = useState(null);
-    const [redeployingProjectId, setRedeployingProjectId] = useState(null);
     const [executingScriptProjectId, setExecutingScriptProjectId] = useState(null);
-    const [redeployMessage, setRedeployMessage] = useState(null); // { type: 'success' | 'error', text: string }
-    const redeployMessageTimeoutRef = useRef(null);
 
-    const baseDomain = import.meta.env.VITE_BASE_DOMAIN || "localhost";
-    const basePort = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
-    const baseUrl = `http://${baseDomain}${basePort}`;
+    // Messages
+    const [message, setMessage] = useState(null);
+    const messageTimeoutRef = useRef(null);
 
     useEffect(() => {
         if (!getToken()) {
@@ -35,442 +41,258 @@ export default function GroupView() {
         fetchGroup();
     }, [groupId, nav]);
 
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        const handleClickOutside = () => setOpenMenuId(null);
-        if (openMenuId) {
-            document.addEventListener("click", handleClickOutside);
-            return () => document.removeEventListener("click", handleClickOutside);
-        }
-    }, [openMenuId]);
-
     useEffect(() => {
         return () => {
-            if (redeployMessageTimeoutRef.current) {
-                clearTimeout(redeployMessageTimeoutRef.current);
-                redeployMessageTimeoutRef.current = null;
+            if (messageTimeoutRef.current) {
+                clearTimeout(messageTimeoutRef.current);
             }
         };
     }, []);
 
-    const showRedeployMessage = (type, text, timeoutMs = 4000) => {
-        setRedeployMessage({ type, text });
-        if (redeployMessageTimeoutRef.current) clearTimeout(redeployMessageTimeoutRef.current);
-        redeployMessageTimeoutRef.current = setTimeout(() => {
-            setRedeployMessage(null);
-            redeployMessageTimeoutRef.current = null;
+    const showMessage = (type, text, timeoutMs = 4000) => {
+        setMessage({ type, text });
+        if (messageTimeoutRef.current) clearTimeout(messageTimeoutRef.current);
+        messageTimeoutRef.current = setTimeout(() => {
+            setMessage(null);
         }, timeoutMs);
     };
 
     const fetchGroup = async () => {
         try {
-            // We need to fetch groups and find the one. 
-            // Better to have GET /api/groups/:id, but we only implemented GET /api/groups
-            // I'll filter for now, or implement GET /api/groups/:id later.
-            // Let's rely on GET /api/groups for now to minimize backend changes if not strictly needed.
-            const res = await apiFetch("/groups", { token: getToken() });
-            const g = res.groups.find(g => g.id === groupId);
-            if (!g) {
-                setErr("Group not found");
-                return;
-            }
+            // Use new GET /api/groups/:id endpoint
+            const g = await apiFetch(`/groups/${groupId}`, { token: getToken() });
             setGroup(g);
-            setProjects(g.projects || []);
         } catch (e) {
             setErr(e.message);
         }
     };
-    
-    // Deletion of Project
-    const deleteProject = async (projectId, projectName) => {
-        const confirmed = window.confirm(
-            `Delete "${projectName}"?\n\n` +
-            `This will permanently remove your site and all its data.\n` +
-            `This action cannot be undone.`
-        );
 
+    // Delete a component (frontend/backend)
+    const deleteComponent = async (projectId, componentType) => {
+        const confirmed = window.confirm(
+            `Delete ${componentType}?\n\nThis will permanently remove the ${componentType} and all its data.`
+        );
         if (!confirmed) return;
 
-        setDeletingProjectId(projectId);
-
+        setDeletingComponent(componentType);
         try {
             await apiFetch(`/projects/${projectId}`, {
                 method: "DELETE",
                 token: getToken()
             });
+            showMessage("success", `${componentType} deleted successfully`);
             fetchGroup();
         } catch (e) {
-            alert(`Failed to delete project: ${e.message}`);
+            showMessage("error", `Failed to delete: ${e.message}`);
         } finally {
-            setDeletingProjectId(null);
+            setDeletingComponent(null);
         }
     };
 
-    // Redeploy Project
-    const redeployProject = async (projectId, projectName, hasGitRepo) => {
-        const message = hasGitRepo
-            ? `Redeploy "${projectName}"?\n\nThis will pull the latest code from GitHub and redeploy your project.`
-            : `Redeploy "${projectName}"?\n\nThis will redeploy your project with the current workspace files.`;
-
-        const confirmed = window.confirm(message);
-
+    // Delete database
+    const deleteDatabase = async (databaseId) => {
+        const confirmed = window.confirm(
+            `Delete database?\n\nThis will permanently delete all data. This action cannot be undone.`
+        );
         if (!confirmed) return;
 
-        setRedeployingProjectId(projectId);
-        setRedeployMessage(null);
+        setDeletingComponent("database");
+        try {
+            await apiFetch(`/databases/${databaseId}`, {
+                method: "DELETE",
+                token: getToken()
+            });
+            showMessage("success", "Database deleted successfully");
+            fetchGroup();
+        } catch (e) {
+            showMessage("error", `Failed to delete database: ${e.message}`);
+        } finally {
+            setDeletingComponent(null);
+        }
+    };
 
+    // Redeploy component
+    const redeployComponent = async (projectId, componentType) => {
+        const confirmed = window.confirm(`Redeploy ${componentType}?`);
+        if (!confirmed) return;
+
+        setRedeployingComponent(componentType);
         try {
             const result = await apiFetch(`/deployments/${projectId}/redeploy`, {
                 method: "POST",
                 token: getToken()
             });
-
-            // Poll deployment status
-            const deploymentId = result.deploymentId;
-            pollDeploymentStatus(deploymentId, projectId);
+            pollDeploymentStatus(result.deploymentId, componentType);
         } catch (e) {
-            showRedeployMessage("error", `Failed to start redeployment: ${e.message}`);
-            setRedeployingProjectId(null);
+            showMessage("error", `Failed to start redeployment: ${e.message}`);
+            setRedeployingComponent(null);
         }
     };
 
-    // Poll deployment status until completion
-    const pollDeploymentStatus = async (deploymentId, projectId) => {
+    const pollDeploymentStatus = async (deploymentId, componentType) => {
         const pollInterval = setInterval(async () => {
             try {
                 const deployment = await apiFetch(`/deployments/status/${deploymentId}`, {
                     token: getToken()
                 });
 
-                // Check if deployment is finished
                 if (deployment.status === "DEPLOYED" || deployment.status === "FAILED") {
                     clearInterval(pollInterval);
-                    setRedeployingProjectId(null);
-
+                    setRedeployingComponent(null);
                     if (deployment.status === "DEPLOYED") {
-                        showRedeployMessage("success", "Redeployment successful!");
+                        showMessage("success", `${componentType} redeployed successfully!`);
                     } else {
-                        showRedeployMessage("error", "Redeployment failed! Check logs for details.");
+                        showMessage("error", `${componentType} redeployment failed!`);
                     }
-
-                    fetchGroup(); // Refresh project status
+                    fetchGroup();
                 }
             } catch (e) {
                 clearInterval(pollInterval);
-                setRedeployingProjectId(null);
-                showRedeployMessage("error", e.message || "Failed to poll deployment status");
+                setRedeployingComponent(null);
+                showMessage("error", e.message);
             }
-        }, 2000); // Poll every 2 seconds
+        }, 2000);
     };
 
     if (err) return <div style={{ padding: 40, textAlign: "center" }}>Error: {err}</div>;
     if (!group) return <div style={{ padding: 40 }}>Loading...</div>;
 
+    const projectUrl = group.slug ? `http://${group.slug}.${BASE_DOMAIN}${BASE_PORT}` : null;
+
     return (
         <div style={{ maxWidth: 1000, margin: "40px auto", padding: 16 }}>
+            {/* Back button */}
             <div style={{ marginBottom: 20 }}>
                 <button onClick={() => nav("/dashboard")} style={{ background: "none", border: "none", cursor: "pointer", color: "#666" }}>
                     ← Back to Dashboard
                 </button>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
-                <div>
-                    <h1 style={{ margin: 0 }}>{group.name}</h1>
-                    <p style={{ color: "#666", marginTop: 5 }}>Project Group</p>
-                </div>
-                
-                {!showWizard && (
-                    <button onClick={() => setShowWizard(true)} style={{ background: "#2196F3", color: "white", padding: "10px 20px", borderRadius: 6, border: "none", cursor: "pointer" }}>
-                        + Create New Site
-                    </button>
+            {/* Project Header */}
+            <div style={{ marginBottom: 30 }}>
+                <h1 style={{ margin: "0 0 8px 0" }}>{group.name}</h1>
+                {projectUrl && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 15, color: "#666" }}>
+                        <span>
+                            URL: <a href={projectUrl} target="_blank" rel="noreferrer" style={{ color: "#2196F3" }}>
+                                {group.slug}.{BASE_DOMAIN}{BASE_PORT}
+                            </a>
+                        </span>
+                        <span>|</span>
+                        <span>API Prefix: <code style={{ background: "#f5f5f5", padding: "2px 6px", borderRadius: 4 }}>{group.apiPathPrefix || "/api"}</code></span>
+                    </div>
                 )}
             </div>
 
-            {redeployMessage && (
+            {/* Message */}
+            {message && (
                 <div style={{
                     marginBottom: 20,
-                    padding: "12px 14px",
-                    borderRadius: 10,
-                    border: "1px solid",
-                    borderColor: redeployMessage.type === "success" ? "#c8e6c9" : "#ef9a9a",
-                    background: redeployMessage.type === "success" ? "#e8f5e9" : "#ffebee",
-                    color: redeployMessage.type === "success" ? "#2e7d32" : "#c62828",
-                    fontWeight: 600
+                    padding: "12px 16px",
+                    borderRadius: 8,
+                    background: message.type === "success" ? "#e8f5e9" : "#ffebee",
+                    color: message.type === "success" ? "#2e7d32" : "#c62828",
+                    border: `1px solid ${message.type === "success" ? "#c8e6c9" : "#ffcdd2"}`
                 }}>
-                    {redeployMessage.text}
+                    {message.text}
                 </div>
             )}
 
-            {showWizard ? (
-                <div>
-                    <button onClick={() => setShowWizard(false)} style={{ marginBottom: 20 }}>Cancel</button>
-                    <DeploymentWizard 
+            {/* Deployment Wizard */}
+            {showWizard && (
+                <div style={{ marginBottom: 30, padding: 20, background: "#f9f9f9", borderRadius: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                        <h3 style={{ margin: 0 }}>Deploy {wizardRole === "FRONTEND" ? "Frontend" : "Backend"}</h3>
+                        <button onClick={() => { setShowWizard(false); setWizardRole(null); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.2em" }}>×</button>
+                    </div>
+                    <DeploymentWizard
                         groupId={groupId}
+                        role={wizardRole}
+                        groupSlug={group.slug}
                         onComplete={() => {
                             setShowWizard(false);
+                            setWizardRole(null);
                             fetchGroup();
-                        }} 
+                        }}
                     />
-                </div>
-            ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 }}>
-                    {projects.length === 0 ? (
-                        <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 40, border: "2px dashed #ddd", borderRadius: 12 }}>
-                            <h3>No sites yet</h3>
-                            <p>Create your first site in this project group.</p>
-                            <button onClick={() => setShowWizard(true)}>Create Site</button>
-                        </div>
-                    ) : (
-                        projects.map(p => {
-                            const latestStatus = p.latestDeployment?.status || "IDLE";
-                            const isDeployed = p.hasDeployedVersion;
-                            // Both server and frontend now use subdomain-based routing
-                            const siteUrl = `http://${p.slug}.${baseDomain}${basePort}`;
-                            const siteLabel = `${p.slug}.${baseDomain}${basePort}`;
-
-                            const statusColors = {
-                                "DEPLOYED": { bg: "#e8f5e9", color: "#2e7d32" },
-                                "BUILDING": { bg: "#e3f2fd", color: "#1565c0" },
-                                "FINALIZING": { bg: "#fff3e0", color: "#ef6c00" },
-                                "QUEUED": { bg: "#f3e5f5", color: "#7b1fa2" },
-                                "FAILED": { bg: "#ffebee", color: "#c62828" },
-                                "IDLE": { bg: "#f5f5f5", color: "#616161" }
-                            };
-                            const statusStyle = statusColors[latestStatus] || statusColors.IDLE;
-
-                            return (
-                                <div key={p.id} style={{
-                                    border: "1px solid #eee",
-                                    padding: 20,
-                                    borderRadius: 12,
-                                    background: "white",
-                                    boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
-                                    position: "relative"
-                                }}>
-                                    {deletingProjectId === p.id && (
-                                        <div style={{
-                                            position: "absolute",
-                                            top: 0, left: 0, right: 0, bottom: 0,
-                                            background: "rgba(255, 255, 255, 0.9)",
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            borderRadius: 12,
-                                            zIndex: 20,
-                                            gap: 10
-                                        }}>
-                                            <div className="spinner"></div>
-                                            <span style={{ fontWeight: 600, color: "#c62828", fontSize: "0.9em" }}>Deleting...</span>
-                                        </div>
-                                    )}
-                                    {redeployingProjectId === p.id && (
-                                        <div style={{
-                                            position: "absolute",
-                                            top: 0, left: 0, right: 0, bottom: 0,
-                                            background: "rgba(255, 255, 255, 0.9)",
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            borderRadius: 12,
-                                            zIndex: 20,
-                                            gap: 10
-                                        }}>
-                                            <div className="spinner"></div>
-                                            <span style={{ fontWeight: 600, color: "#2196F3", fontSize: "0.9em" }}>Redeploying...</span>
-                                        </div>
-                                    )}
-                                    <h3 style={{ margin: "0 0 10px 0" }}>{p.name}</h3>
-                                    <div style={{ fontSize: "0.9em", color: "#666", marginBottom: 15 }}>
-                                         {isDeployed ? (
-                                             <div>
-                                                 URL: <a href={siteUrl} target="_blank" rel="noreferrer" style={{ color: "#2196F3", textDecoration: "none", fontWeight: 500 }}>
-                                                    {siteLabel}
-                                                 </a>
-                                             </div>
-                                         ) : (
-                                             <div style={{ color: "#999", fontStyle: "italic" }}>Not deployed yet</div>
-                                         )}
-                                    </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                        <span style={{
-                                            padding: "4px 10px", borderRadius: 20, fontSize: "0.8em",
-                                            background: statusStyle.bg, color: statusStyle.color
-                                        }}>
-                                            {latestStatus}
-                                        </span>
-                                        <div style={{ position: "relative" }}>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setOpenMenuId(openMenuId === p.id ? null : p.id);
-                                                }}
-                                                style={{
-                                                    background: "none",
-                                                    border: "1px solid #ddd",
-                                                    borderRadius: 4,
-                                                    cursor: "pointer",
-                                                    padding: "4px 8px",
-                                                    fontSize: "1.2em",
-                                                    color: "#666",
-                                                    lineHeight: 1
-                                                }}
-                                            >
-                                                ⋮
-                                            </button>
-                                            {openMenuId === p.id && (
-                                                <div style={{
-                                                    position: "absolute",
-                                                    right: 0,
-                                                    top: "100%",
-                                                    marginTop: 4,
-                                                    background: "white",
-                                                    border: "1px solid #ddd",
-                                                    borderRadius: 6,
-                                                    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                                                    minWidth: 180,
-                                                    zIndex: 1000
-                                                }}>
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setOpenMenuId(null);
-                                                            setManagingFilesProjectId(p.id);
-                                                        }}
-                                                        style={{
-                                                            width: "100%",
-                                                            textAlign: "left",
-                                                            padding: "10px 15px",
-                                                            background: "none",
-                                                            border: "none",
-                                                            cursor: "pointer",
-                                                            fontSize: "0.9em",
-                                                            borderBottom: "1px solid #eee"
-                                                        }}
-                                                        onMouseEnter={e => e.target.style.background = "#f5f5f5"}
-                                                        onMouseLeave={e => e.target.style.background = "none"}
-                                                    >
-                                                        📂 Manage Files
-                                                    </button>
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setOpenMenuId(null);
-                                                            setEditingEnvProjectId(p.id);
-                                                        }}
-                                                        style={{
-                                                            width: "100%",
-                                                            textAlign: "left",
-                                                            padding: "10px 15px",
-                                                            background: "none",
-                                                            border: "none",
-                                                            cursor: "pointer",
-                                                            fontSize: "0.9em",
-                                                            borderBottom: "1px solid #eee"
-                                                        }}
-                                                        onMouseEnter={e => e.target.style.background = "#f5f5f5"}
-                                                        onMouseLeave={e => e.target.style.background = "none"}
-                                                    >
-                                                        ⚙️ Edit Environment Variables
-                                                    </button>
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setOpenMenuId(null);
-                                                            redeployProject(p.id, p.name, !!p.repoFullName);
-                                                        }}
-                                                        disabled={redeployingProjectId === p.id}
-                                                        style={{
-                                                            width: "100%",
-                                                            textAlign: "left",
-                                                            padding: "10px 15px",
-                                                            background: "none",
-                                                            border: "none",
-                                                            cursor: redeployingProjectId === p.id ? "not-allowed" : "pointer",
-                                                            fontSize: "0.9em",
-                                                            borderBottom: "1px solid #eee",
-                                                            color: redeployingProjectId === p.id ? "#999" : "#2196F3",
-                                                            opacity: redeployingProjectId === p.id ? 0.7 : 1
-                                                        }}
-                                                        onMouseEnter={e => !redeployingProjectId && (e.target.style.background = "#e3f2fd")}
-                                                        onMouseLeave={e => e.target.style.background = "none"}
-                                                    >
-                                                        {redeployingProjectId === p.id ? "🔄 Redeploying..." : "🚀 Redeploy"}
-                                                    </button>
-                                                    {(p.deployType === "BACKEND" || p.deployType === "FULLSTACK") && (
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setOpenMenuId(null);
-                                                                setExecutingScriptProjectId(p.id);
-                                                            }}
-                                                            style={{
-                                                                width: "100%",
-                                                                textAlign: "left",
-                                                                padding: "10px 15px",
-                                                                background: "none",
-                                                                border: "none",
-                                                                cursor: "pointer",
-                                                                fontSize: "0.9em",
-                                                                borderBottom: "1px solid #eee"
-                                                            }}
-                                                            onMouseEnter={e => e.target.style.background = "#f5f5f5"}
-                                                            onMouseLeave={e => e.target.style.background = "none"}
-                                                        >
-                                                            ▶️ Execute Script
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setOpenMenuId(null);
-                                                            deleteProject(p.id, p.name);
-                                                        }}
-                                                        disabled={deletingProjectId === p.id}
-                                                        style={{
-                                                            width: "100%",
-                                                            textAlign: "left",
-                                                            padding: "10px 15px",
-                                                            background: "none",
-                                                            border: "none",
-                                                            cursor: deletingProjectId === p.id ? "not-allowed" : "pointer",
-                                                            fontSize: "0.9em",
-                                                            color: deletingProjectId === p.id ? "#999" : "#c62828",
-                                                            opacity: deletingProjectId === p.id ? 0.7 : 1
-                                                        }}
-                                                        onMouseEnter={e => !deletingProjectId && (e.target.style.background = "#ffebee")}
-                                                        onMouseLeave={e => e.target.style.background = "none"}
-                                                    >
-                                                        {deletingProjectId === p.id ? "🗑️ Deleting..." : "🗑️ Delete"}
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })
-                    )}
                 </div>
             )}
 
+            {/* Database Modal */}
+            {showDbModal && (
+                <CreateDatabaseModal
+                    groupId={groupId}
+                    groupSlug={group.slug}
+                    onClose={() => setShowDbModal(false)}
+                    onSuccess={() => {
+                        setShowDbModal(false);
+                        fetchGroup();
+                    }}
+                />
+            )}
+
+            {/* 3-Card Layout */}
+            {!showWizard && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20 }}>
+                    {/* Frontend Card */}
+                    <ComponentCard
+                        title="Frontend"
+                        icon="🌐"
+                        component={group.frontend}
+                        hasComponent={group.hasFrontend}
+                        isDeleting={deletingComponent === "frontend"}
+                        isRedeploying={redeployingComponent === "frontend"}
+                        onAdd={() => { setWizardRole("FRONTEND"); setShowWizard(true); }}
+                        onDelete={() => deleteComponent(group.frontend?.id, "Frontend")}
+                        onRedeploy={() => redeployComponent(group.frontend?.id, "Frontend")}
+                        onManageFiles={() => setManagingFilesProjectId(group.frontend?.id)}
+                        onEditEnv={() => setEditingEnvProjectId(group.frontend?.id)}
+                    />
+
+                    {/* Backend Card */}
+                    <ComponentCard
+                        title="Backend"
+                        icon="⚙️"
+                        component={group.backend}
+                        hasComponent={group.hasBackend}
+                        isDeleting={deletingComponent === "backend"}
+                        isRedeploying={redeployingComponent === "backend"}
+                        onAdd={() => { setWizardRole("BACKEND"); setShowWizard(true); }}
+                        onDelete={() => deleteComponent(group.backend?.id, "Backend")}
+                        onRedeploy={() => redeployComponent(group.backend?.id, "Backend")}
+                        onManageFiles={() => setManagingFilesProjectId(group.backend?.id)}
+                        onEditEnv={() => setEditingEnvProjectId(group.backend?.id)}
+                        onExecuteScript={() => setExecutingScriptProjectId(group.backend?.id)}
+                        showExecuteScript
+                    />
+
+                    {/* Database Card */}
+                    <DatabaseCard
+                        database={group.database}
+                        hasDatabase={group.hasDatabase}
+                        databaseInfo={group.databaseInfo}
+                        isDeleting={deletingComponent === "database"}
+                        onAdd={() => setShowDbModal(true)}
+                        onDelete={() => deleteDatabase(group.database?.id)}
+                        onManage={() => nav(`/databases/${group.database?.id}`)}
+                    />
+                </div>
+            )}
+
+            {/* Modals */}
             {editingEnvProjectId && (
                 <EditEnvModal
                     projectId={editingEnvProjectId}
-                    projectName={projects.find(p => p.id === editingEnvProjectId)?.name || ""}
+                    projectName={group.frontend?.id === editingEnvProjectId ? "Frontend" : "Backend"}
                     onClose={() => setEditingEnvProjectId(null)}
-                    onSuccess={() => {
-                        fetchGroup();
-                    }}
+                    onSuccess={fetchGroup}
                 />
             )}
 
             {managingFilesProjectId && (
                 <FileManagerModal
                     projectId={managingFilesProjectId}
-                    projectName={projects.find(p => p.id === managingFilesProjectId)?.name || ""}
+                    projectName={group.frontend?.id === managingFilesProjectId ? "Frontend" : "Backend"}
                     onClose={() => setManagingFilesProjectId(null)}
                 />
             )}
@@ -478,10 +300,315 @@ export default function GroupView() {
             {executingScriptProjectId && (
                 <ExecuteScriptModal
                     projectId={executingScriptProjectId}
-                    projectName={projects.find(p => p.id === executingScriptProjectId)?.name || ""}
+                    projectName="Backend"
                     onClose={() => setExecutingScriptProjectId(null)}
                 />
             )}
         </div>
+    );
+}
+
+// Component Card (for Frontend/Backend)
+function ComponentCard({
+    title,
+    icon,
+    component,
+    hasComponent,
+    isDeleting,
+    isRedeploying,
+    onAdd,
+    onDelete,
+    onRedeploy,
+    onManageFiles,
+    onEditEnv,
+    onExecuteScript,
+    showExecuteScript
+}) {
+    const [menuOpen, setMenuOpen] = useState(false);
+
+    const getStatusStyle = (status) => {
+        const styles = {
+            "DEPLOYED": { bg: "#e8f5e9", color: "#2e7d32", text: "Deployed" },
+            "BUILDING": { bg: "#e3f2fd", color: "#1565c0", text: "Building" },
+            "FAILED": { bg: "#ffebee", color: "#c62828", text: "Failed" },
+            "IDLE": { bg: "#f5f5f5", color: "#757575", text: "Idle" }
+        };
+        return styles[status] || styles.IDLE;
+    };
+
+    if (!hasComponent) {
+        return (
+            <div style={{
+                border: "2px dashed #ddd",
+                borderRadius: 12,
+                padding: 30,
+                textAlign: "center",
+                background: "#fafafa"
+            }}>
+                <div style={{ fontSize: "2em", marginBottom: 10 }}>{icon}</div>
+                <h3 style={{ margin: "0 0 10px 0", color: "#666" }}>{title}</h3>
+                <p style={{ color: "#999", fontSize: "0.9em", marginBottom: 15 }}>Not deployed</p>
+                <button
+                    onClick={onAdd}
+                    style={{
+                        background: "#2196F3",
+                        color: "white",
+                        border: "none",
+                        padding: "10px 20px",
+                        borderRadius: 6,
+                        cursor: "pointer"
+                    }}
+                >
+                    + Add {title}
+                </button>
+            </div>
+        );
+    }
+
+    const status = getStatusStyle(component?.deploymentStatus);
+
+    return (
+        <div style={{
+            border: "1px solid #e0e0e0",
+            borderRadius: 12,
+            padding: 20,
+            background: "white",
+            position: "relative"
+        }}>
+            {/* Loading overlay */}
+            {(isDeleting || isRedeploying) && (
+                <div style={{
+                    position: "absolute",
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    background: "rgba(255,255,255,0.9)",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 12,
+                    zIndex: 10
+                }}>
+                    <div className="spinner"></div>
+                    <span style={{ marginTop: 10, color: isDeleting ? "#c62828" : "#2196F3" }}>
+                        {isDeleting ? "Deleting..." : "Redeploying..."}
+                    </span>
+                </div>
+            )}
+
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 15 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: "1.5em" }}>{icon}</span>
+                    <h3 style={{ margin: 0 }}>{title}</h3>
+                </div>
+                <div style={{ position: "relative" }}>
+                    <button
+                        onClick={() => setMenuOpen(!menuOpen)}
+                        style={{ background: "none", border: "1px solid #ddd", borderRadius: 4, padding: "4px 8px", cursor: "pointer" }}
+                    >⋮</button>
+                    {menuOpen && (
+                        <div style={{
+                            position: "absolute",
+                            right: 0,
+                            top: "100%",
+                            background: "white",
+                            border: "1px solid #ddd",
+                            borderRadius: 6,
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                            minWidth: 160,
+                            zIndex: 100
+                        }}>
+                            <MenuButton onClick={() => { setMenuOpen(false); onManageFiles(); }}>📂 Manage Files</MenuButton>
+                            <MenuButton onClick={() => { setMenuOpen(false); onEditEnv(); }}>⚙️ Environment</MenuButton>
+                            <MenuButton onClick={() => { setMenuOpen(false); onRedeploy(); }} color="#2196F3">🚀 Redeploy</MenuButton>
+                            {showExecuteScript && (
+                                <MenuButton onClick={() => { setMenuOpen(false); onExecuteScript(); }}>▶️ Execute Script</MenuButton>
+                            )}
+                            <MenuButton onClick={() => { setMenuOpen(false); onDelete(); }} color="#c62828">🗑️ Delete</MenuButton>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Status */}
+            <div style={{
+                display: "inline-block",
+                padding: "4px 12px",
+                borderRadius: 20,
+                background: status.bg,
+                color: status.color,
+                fontSize: "0.85em",
+                fontWeight: 500,
+                marginBottom: 15
+            }}>
+                {status.text}
+            </div>
+
+            {/* Info */}
+            <div style={{ fontSize: "0.9em", color: "#666" }}>
+                {component?.framework && <div>Framework: {component.framework}</div>}
+                {component?.port && <div>Port: {component.port}</div>}
+            </div>
+        </div>
+    );
+}
+
+// Database Card
+function DatabaseCard({ database, hasDatabase, databaseInfo, isDeleting, onAdd, onDelete, onManage }) {
+    const [menuOpen, setMenuOpen] = useState(false);
+
+    const getStatusStyle = (status) => {
+        const styles = {
+            "RUNNING": { bg: "#e8f5e9", color: "#2e7d32", text: "Running" },
+            "CREATING": { bg: "#fff3e0", color: "#e65100", text: "Creating" },
+            "STOPPED": { bg: "#f5f5f5", color: "#757575", text: "Stopped" },
+            "ERROR": { bg: "#ffebee", color: "#c62828", text: "Error" },
+            "FAILED": { bg: "#ffebee", color: "#c62828", text: "Failed" }
+        };
+        return styles[status] || { bg: "#f5f5f5", color: "#757575", text: status || "Unknown" };
+    };
+
+    if (!hasDatabase) {
+        return (
+            <div style={{
+                border: "2px dashed #ddd",
+                borderRadius: 12,
+                padding: 30,
+                textAlign: "center",
+                background: "#fafafa"
+            }}>
+                <div style={{ fontSize: "2em", marginBottom: 10 }}>🗄️</div>
+                <h3 style={{ margin: "0 0 10px 0", color: "#666" }}>Database</h3>
+                <p style={{ color: "#999", fontSize: "0.9em", marginBottom: 15 }}>Not created</p>
+                <button
+                    onClick={onAdd}
+                    style={{
+                        background: "#673ab7",
+                        color: "white",
+                        border: "none",
+                        padding: "10px 20px",
+                        borderRadius: 6,
+                        cursor: "pointer"
+                    }}
+                >
+                    + Add Database
+                </button>
+            </div>
+        );
+    }
+
+    const status = getStatusStyle(databaseInfo?.status);
+
+    return (
+        <div style={{
+            border: "1px solid #e0e0e0",
+            borderRadius: 12,
+            padding: 20,
+            background: "white",
+            position: "relative"
+        }}>
+            {isDeleting && (
+                <div style={{
+                    position: "absolute",
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    background: "rgba(255,255,255,0.9)",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 12,
+                    zIndex: 10
+                }}>
+                    <div className="spinner"></div>
+                    <span style={{ marginTop: 10, color: "#c62828" }}>Deleting...</span>
+                </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 15 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: "1.5em" }}>🗄️</span>
+                    <h3 style={{ margin: 0 }}>Database</h3>
+                </div>
+                <div style={{ position: "relative" }}>
+                    <button
+                        onClick={() => setMenuOpen(!menuOpen)}
+                        style={{ background: "none", border: "1px solid #ddd", borderRadius: 4, padding: "4px 8px", cursor: "pointer" }}
+                    >⋮</button>
+                    {menuOpen && (
+                        <div style={{
+                            position: "absolute",
+                            right: 0,
+                            top: "100%",
+                            background: "white",
+                            border: "1px solid #ddd",
+                            borderRadius: 6,
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                            minWidth: 160,
+                            zIndex: 100
+                        }}>
+                            <MenuButton onClick={() => { setMenuOpen(false); onManage(); }}>📊 Manage</MenuButton>
+                            <MenuButton onClick={() => { setMenuOpen(false); onDelete(); }} color="#c62828">🗑️ Delete</MenuButton>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div style={{
+                display: "inline-block",
+                padding: "4px 12px",
+                borderRadius: 20,
+                background: status.bg,
+                color: status.color,
+                fontSize: "0.85em",
+                fontWeight: 500,
+                marginBottom: 15
+            }}>
+                {status.text}
+            </div>
+
+            <div style={{ fontSize: "0.9em", color: "#666" }}>
+                <div>Type: {databaseInfo?.type || database?.type}</div>
+            </div>
+
+            <button
+                onClick={onManage}
+                style={{
+                    marginTop: 15,
+                    width: "100%",
+                    padding: "8px",
+                    background: "#673ab7",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 6,
+                    cursor: "pointer"
+                }}
+            >
+                Open Database
+            </button>
+        </div>
+    );
+}
+
+// Menu Button helper
+function MenuButton({ children, onClick, color }) {
+    return (
+        <button
+            onClick={onClick}
+            style={{
+                width: "100%",
+                textAlign: "left",
+                padding: "10px 15px",
+                background: "none",
+                border: "none",
+                borderBottom: "1px solid #eee",
+                cursor: "pointer",
+                fontSize: "0.9em",
+                color: color || "inherit"
+            }}
+            onMouseEnter={e => e.target.style.background = "#f5f5f5"}
+            onMouseLeave={e => e.target.style.background = "none"}
+        >
+            {children}
+        </button>
     );
 }

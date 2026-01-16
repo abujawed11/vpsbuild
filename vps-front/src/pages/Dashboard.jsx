@@ -3,12 +3,44 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { clearToken, getToken } from "../lib/auth";
 
+const BASE_DOMAIN = import.meta.env.VITE_BASE_DOMAIN || "93.127.199.118.sslip.io";
+
+// Status badge component for FE/BE/DB indicators
+function StatusBadge({ icon, label, active, status }) {
+    const getStatusColor = () => {
+        if (!active) return { bg: "#f5f5f5", text: "#999", border: "#e0e0e0" };
+        if (status === "DEPLOYED" || status === "RUNNING") return { bg: "#e8f5e9", text: "#2e7d32", border: "#c8e6c9" };
+        if (status === "BUILDING" || status === "CREATING") return { bg: "#fff3e0", text: "#e65100", border: "#ffe0b2" };
+        if (status === "FAILED" || status === "ERROR") return { bg: "#ffebee", text: "#c62828", border: "#ffcdd2" };
+        return { bg: "#e3f2fd", text: "#1565c0", border: "#bbdefb" };
+    };
+
+    const colors = getStatusColor();
+
+    return (
+        <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "4px 8px",
+            borderRadius: 6,
+            background: colors.bg,
+            border: `1px solid ${colors.border}`,
+            fontSize: "0.75em"
+        }}>
+            <span>{icon}</span>
+            <span style={{ color: colors.text, fontWeight: 500 }}>
+                {active ? "✓" : "−"}
+            </span>
+        </div>
+    );
+}
+
 export default function Dashboard() {
     const nav = useNavigate();
     const [user, setUser] = useState(null);
     const [err, setErr] = useState("");
     const [groups, setGroups] = useState([]);
-    const [ungroupedProjects, setUngroupedProjects] = useState([]);
     const [showCreateGroup, setShowCreateGroup] = useState(false);
     const [newGroupName, setNewGroupName] = useState("");
     const [showSuccessMessage, setShowSuccessMessage] = useState(false);
@@ -47,15 +79,9 @@ export default function Dashboard() {
 
     const fetchData = async () => {
         try {
-            // Fetch groups and projects
-            const [gRes, pRes] = await Promise.all([
-                apiFetch("/groups", { token: getToken() }),
-                apiFetch("/projects", { token: getToken() })
-            ]);
-            
+            // Fetch groups (now includes hasFrontend, hasBackend, hasDatabase)
+            const gRes = await apiFetch("/groups", { token: getToken() });
             setGroups(gRes.groups || []);
-            // Filter projects that are not in any group
-            setUngroupedProjects((pRes.projects || []).filter(p => !p.groupId));
         } catch (e) { console.error(e); }
     };
 
@@ -129,11 +155,8 @@ export default function Dashboard() {
                         )}
                     </div>
 
-                    <button onClick={() => nav("/databases")} style={{ background: "#673ab7", color: "white", padding: "10px 20px", borderRadius: 6, border: "none", cursor: "pointer" }}>
-                        🗄️ Databases
-                    </button>
                     <button onClick={() => setShowCreateGroup(true)} style={{ background: "#2196F3", color: "white", padding: "10px 20px", borderRadius: 6, border: "none", cursor: "pointer" }}>
-                        + Create Project
+                        + New Project
                     </button>
                     <button onClick={logout} style={{ background: "#eee", color: "#333", border: "none", padding: "10px 20px", borderRadius: 6, cursor: "pointer" }}>Logout</button>
                 </div>
@@ -175,13 +198,13 @@ export default function Dashboard() {
                  </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 20 }}>
                 {groups.map(g => (
-                    <div 
-                        key={g.id} 
+                    <div
+                        key={g.id}
                         onClick={() => !deletingGroupId && nav(`/groups/${g.id}`)}
-                        style={{ 
-                            border: "1px solid #e0e0e0", borderRadius: 12, padding: 20, 
+                        style={{
+                            border: "1px solid #e0e0e0", borderRadius: 12, padding: 20,
                             cursor: deletingGroupId === g.id ? "default" : "pointer",
                             background: "white", transition: "box-shadow 0.2s ease",
                             boxShadow: "0 2px 5px rgba(0,0,0,0.05)",
@@ -208,29 +231,47 @@ export default function Dashboard() {
                             </div>
                         )}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                            <h3 style={{ margin: "0 0 10px 0", color: "#333" }}>{g.name}</h3>
-                            <button 
+                            <div>
+                                <h3 style={{ margin: "0 0 5px 0", color: "#333" }}>{g.name}</h3>
+                                {g.slug && (
+                                    <div style={{ fontSize: "0.8em", color: "#666" }}>
+                                        {g.slug}.{BASE_DOMAIN}
+                                    </div>
+                                )}
+                            </div>
+                            <button
                                 onClick={(e) => { e.stopPropagation(); deleteGroup(g.id, g.name); }}
                                 disabled={deletingGroupId === g.id}
                                 style={{ background: "none", border: "none", color: "#999", cursor: deletingGroupId === g.id ? "not-allowed" : "pointer", padding: 5 }}
                             >✕</button>
                         </div>
-                        <div style={{ color: "#666", fontSize: "0.9em" }}>
-                            {g.projects.length} Site{g.projects.length !== 1 ? 's' : ''}
-                        </div>
-                        <div style={{ display: "flex", gap: 5, marginTop: 15 }}>
-                            {g.projects.slice(0, 3).map(p => (
-                                <div key={p.id} style={{ 
-                                    width: 10, height: 10, borderRadius: "50%", 
-                                    background: p.hasDeployedVersion ? "#4caf50" : "#bdbdbd" 
-                                }} title={p.name} />
-                            ))}
+
+                        {/* FE/BE/DB Status Indicators */}
+                        <div style={{ display: "flex", gap: 12, marginTop: 15 }}>
+                            <StatusBadge
+                                icon="🌐"
+                                label="Frontend"
+                                active={g.hasFrontend}
+                                status={g.frontend?.status}
+                            />
+                            <StatusBadge
+                                icon="⚙️"
+                                label="Backend"
+                                active={g.hasBackend}
+                                status={g.backend?.status}
+                            />
+                            <StatusBadge
+                                icon="🗄️"
+                                label="Database"
+                                active={g.hasDatabase}
+                                status={g.databaseInfo?.status}
+                            />
                         </div>
                     </div>
                 ))}
             </div>
             
-            {groups.length === 0 && ungroupedProjects.length === 0 && !showCreateGroup && (
+            {groups.length === 0 && !showCreateGroup && (
                 <div style={{ textAlign: "center", padding: 60, color: "#999" }}>
                     <h3>Welcome!</h3>
                     <p>Create a project to get started.</p>

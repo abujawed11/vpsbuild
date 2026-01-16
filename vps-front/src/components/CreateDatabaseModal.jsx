@@ -3,12 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 
-export default function CreateDatabaseModal({ onClose, onCreated }) {
+export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, groupId, groupSlug }) {
     const nav = useNavigate();
-    const [name, setName] = useState("");
+    // Auto-name from groupSlug if provided
+    const [name, setName] = useState(groupSlug ? `${groupSlug}-db` : "");
     const [type, setType] = useState("MYSQL");
-    const [projectId, setProjectId] = useState("");
-    const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [failedDbId, setFailedDbId] = useState("");
@@ -16,17 +15,21 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
     const [copied, setCopied] = useState("");
     const [redeploying, setRedeploying] = useState(false);
     const [redeployMsg, setRedeployMsg] = useState("");
+    const [backendProject, setBackendProject] = useState(null);
 
+    // For group-based flow, fetch the backend project (if any) for auto-linking env vars
     useEffect(() => {
-        // Fetch available projects for linking
-        apiFetch("/projects", { token: getToken() })
-            .then(res => {
-                // Filter projects that don't already have a database
-                const availableProjects = (res.projects || []).filter(p => !p.databaseId);
-                setProjects(availableProjects);
-            })
-            .catch(console.error);
-    }, []);
+        if (groupId) {
+            apiFetch(`/groups/${groupId}`, { token: getToken() })
+                .then(res => {
+                    // Backend project is where we'll add DATABASE_URL
+                    if (res.backend) {
+                        setBackendProject(res.backend);
+                    }
+                })
+                .catch(console.error);
+        }
+    }, [groupId]);
 
     const handleCreate = async () => {
         if (!name.trim()) {
@@ -39,19 +42,31 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
         setFailedDbId("");
 
         try {
+            // Build request body based on whether we're in group-based or legacy flow
+            const body = {
+                name: name.trim(),
+                type
+            };
+
+            // Group-based flow: link to project group
+            if (groupId) {
+                body.groupId = groupId;
+            }
+
+            // If there's a backend project, link DATABASE_URL to it
+            if (backendProject?.id) {
+                body.projectId = backendProject.id;
+            }
+
             const result = await apiFetch("/databases", {
                 method: "POST",
                 token: getToken(),
-                body: {
-                    name: name.trim(),
-                    type,
-                    projectId: projectId || undefined
-                }
+                body
             });
 
             setCreatedDb({
                 ...result.database,
-                linkedProjectId: result.linkedProjectId || projectId || null,
+                linkedProjectId: result.linkedProjectId || backendProject?.id || null,
                 redeployRecommended: Boolean(result.redeployRecommended)
             });
         } catch (e) {
@@ -109,11 +124,19 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
         URL.revokeObjectURL(url);
     };
 
+    // Handle modal close - use onSuccess if available, otherwise onCreated
+    const handleDone = () => {
+        if (onSuccess) {
+            onSuccess(createdDb);
+        } else if (onCreated) {
+            onCreated(createdDb);
+        }
+    };
+
     // Success screen after creation
     if (createdDb) {
-        const linkedProject = createdDb.linkedProjectId
-            ? projects.find(p => p.id === createdDb.linkedProjectId)
-            : null;
+        // For group-based flow, use backendProject; for legacy, find from linkedProjectId
+        const linkedProject = backendProject || (createdDb.linkedProjectId ? { id: createdDb.linkedProjectId } : null);
 
         return (
             <div style={{
@@ -139,7 +162,7 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                             ✓ Database Created!
                         </h2>
                         <button
-                            onClick={() => onCreated(createdDb)}
+                            onClick={handleDone}
                             style={{ background: "none", border: "none", fontSize: "1.5em", cursor: "pointer", color: "#999" }}
                         >
                             ×
@@ -159,7 +182,7 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                         </p>
                     </div>
 
-                    {createdDb.linkedProjectId && (
+                    {(createdDb.linkedProjectId || backendProject) && (
                         <div style={{
                             background: "#e3f2fd",
                             border: "1px solid #90caf9",
@@ -167,9 +190,11 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                             padding: 12,
                             marginBottom: 16
                         }}>
-                            <strong style={{ color: "#1565c0" }}>Linked to project</strong>
+                            <strong style={{ color: "#1565c0" }}>
+                                {groupId ? "Linked to project backend" : "Linked to project"}
+                            </strong>
                             <div style={{ marginTop: 6, color: "#1565c0", fontSize: "0.9em" }}>
-                                {linkedProject ? linkedProject.name : createdDb.linkedProjectId} (env vars updated)
+                                {backendProject?.name || linkedProject?.name || createdDb.linkedProjectId} (DATABASE_URL added)
                             </div>
                             <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
                                 <button
@@ -328,7 +353,7 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                             📥 Download .env
                         </button>
                         <button
-                            onClick={() => onCreated(createdDb)}
+                            onClick={handleDone}
                             style={{
                                 background: "#2196F3",
                                 color: "white",
@@ -460,34 +485,49 @@ export default function CreateDatabaseModal({ onClose, onCreated }) {
                     </div>
                 </div>
 
-                <div style={{ marginBottom: 20 }}>
-                    <label style={{ display: "block", marginBottom: 6, fontWeight: 500 }}>
-                        Link to Project (Optional)
-                    </label>
-                    <select
-                        value={projectId}
-                        onChange={e => setProjectId(e.target.value)}
-                        style={{
-                            width: "100%",
-                            padding: 10,
-                            borderRadius: 6,
-                            border: "1px solid #ddd",
-                            fontSize: "1em",
-                            boxSizing: "border-box"
-                        }}
-                    >
-                        <option value="">-- None --</option>
-                        {projects.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                    </select>
-                    <p style={{ fontSize: "0.8em", color: "#666", margin: "8px 0 0 0" }}>
-                        Linking adds DATABASE_URL to project's environment variables.
-                    </p>
-                    <p style={{ fontSize: "0.8em", color: "#666", margin: "6px 0 0 0" }}>
-                        Credentials are generated automatically. Password is shown once after creation.
-                    </p>
-                </div>
+                {/* Project linking info - show differently based on flow */}
+                {groupId ? (
+                    <div style={{ marginBottom: 20 }}>
+                        {backendProject ? (
+                            <div style={{
+                                background: "#e3f2fd",
+                                border: "1px solid #90caf9",
+                                borderRadius: 8,
+                                padding: 12
+                            }}>
+                                <strong style={{ color: "#1565c0", fontSize: "0.9em" }}>
+                                    Will auto-link to: {backendProject.name}
+                                </strong>
+                                <p style={{ fontSize: "0.8em", color: "#1565c0", margin: "6px 0 0 0" }}>
+                                    DATABASE_URL will be added to backend environment variables.
+                                </p>
+                            </div>
+                        ) : (
+                            <div style={{
+                                background: "#fff3e0",
+                                border: "1px solid #ffcc80",
+                                borderRadius: 8,
+                                padding: 12
+                            }}>
+                                <strong style={{ color: "#e65100", fontSize: "0.9em" }}>
+                                    No backend deployed yet
+                                </strong>
+                                <p style={{ fontSize: "0.8em", color: "#e65100", margin: "6px 0 0 0" }}>
+                                    Deploy a backend first to auto-link DATABASE_URL.
+                                </p>
+                            </div>
+                        )}
+                        <p style={{ fontSize: "0.8em", color: "#666", margin: "8px 0 0 0" }}>
+                            Credentials are generated automatically. Password is shown once after creation.
+                        </p>
+                    </div>
+                ) : (
+                    <div style={{ marginBottom: 20 }}>
+                        <p style={{ fontSize: "0.8em", color: "#666", margin: "0" }}>
+                            Credentials are generated automatically. Password is shown once after creation.
+                        </p>
+                    </div>
+                )}
 
                 <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
                     <button

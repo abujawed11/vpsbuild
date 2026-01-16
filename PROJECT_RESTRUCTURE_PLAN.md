@@ -1,5 +1,34 @@
 # VPSBuilds Project Restructure Plan
 
+---
+
+## 📊 Progress Summary
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| **Phase 1** | ✅ COMPLETED | Schema & Backend Updates |
+| **Phase 2** | ⏳ NOT STARTED | Frontend Updates |
+| **Phase 2.5** | 🔄 PARTIAL | File Management (Backend done, Frontend pending) |
+| **Phase 3** | ⏳ NOT STARTED | Nginx & Routing |
+| **Phase 4** | ⏳ NOT STARTED | Testing & Migration |
+
+### What's Done (Phase 1)
+- ✅ Prisma schema updated (slug, apiPathPrefix, role, groupId)
+- ✅ Groups routes updated (slug generation, PATCH, GET single)
+- ✅ Projects routes updated (role handling, container naming)
+- ✅ Databases routes updated (groupId linking)
+- ✅ Nginx config generator rewritten (path-based routing)
+- ✅ Files routes created (upload/list/delete)
+- ✅ Dockerfile updated (auto prisma db push)
+
+### What's Left
+- ⏳ Frontend UI redesign (Dashboard, ProjectView, Cards)
+- ⏳ File Manager component (frontend)
+- ⏳ Deployments route updates
+- ⏳ Testing all scenarios
+
+---
+
 ## Overview
 
 This document outlines the complete restructuring of VPSBuilds from a "multiple sites per project group" model to a "one project = one subdomain with frontend + backend + database" model.
@@ -242,38 +271,39 @@ model Database {
 
 ## Implementation Tasks
 
-### Phase 1: Schema & Backend Updates
+### Phase 1: Schema & Backend Updates ✅ COMPLETED
 
-#### 1.1 Update Prisma Schema
-- [ ] Add `slug` and `apiPathPrefix` to ProjectGroup
-- [ ] Add `role` enum (FRONTEND/BACKEND) to Project
-- [ ] Update Project to require `groupId` and `role`
-- [ ] Update Database to require `groupId` (remove userId as primary link)
-- [ ] Add unique constraint `@@unique([groupId, role])` to Project
-- [ ] Run `prisma db push` to apply changes
+#### 1.1 Update Prisma Schema ✅
+- [x] Add `slug` and `apiPathPrefix` to ProjectGroup
+- [x] Add `role` enum (FRONTEND/BACKEND) to Project
+- [x] Update Project to have optional `role` field (for backward compatibility)
+- [x] Update Database to have optional `groupId` (for backward compatibility)
+- [x] Add unique constraint `@@unique([groupId, role])` to Project
+- [x] Run `prisma db push` to apply changes
 
-#### 1.2 Update Backend Routes
+#### 1.2 Update Backend Routes ✅
 
-**Groups Route (`/api/groups`):**
-- [ ] Update POST `/groups` to generate slug from name
-- [ ] Add PATCH `/groups/:id` to update apiPathPrefix
-- [ ] Update GET `/groups` to include frontend/backend/database status
+**Groups Route (`/api/groups`):** ✅
+- [x] Update POST `/groups` to generate slug from name
+- [x] Add PATCH `/groups/:id` to update apiPathPrefix
+- [x] Update GET `/groups` to include frontend/backend/database status
+- [x] Add GET `/groups/:id` for single group with full details
 
-**Projects Route (`/api/projects`):**
-- [ ] Update POST `/projects` to accept `role` instead of custom name
-- [ ] Auto-generate slug from parent group: `{groupSlug}` for both FE/BE containers
-- [ ] Container naming: `{groupSlug}-frontend`, `{groupSlug}-backend`
-- [ ] Remove ability to create multiple projects of same role in a group
+**Projects Route (`/api/projects`):** ✅
+- [x] Update POST `/projects` to accept `role` instead of custom name
+- [x] Auto-generate slug from parent group: `{groupSlug}` for both FE/BE containers
+- [x] Container naming: `{groupSlug}-frontend`, `{groupSlug}-backend`
+- [x] Remove ability to create multiple projects of same role in a group
 
-**Database Route (`/api/databases`):**
-- [ ] Update POST `/databases` to require `groupId`
-- [ ] Auto-name database container: `{groupSlug}-db`
-- [ ] Enforce one database per group
-- [ ] Remove standalone database creation (must be in a project)
+**Database Route (`/api/databases`):** ✅
+- [x] Update POST `/databases` to accept `groupId`
+- [x] Auto-name database container: `{groupSlug}-db`
+- [x] Enforce one database per group
+- [x] Standalone database creation still allowed (backward compatibility)
 
-#### 1.3 Update Nginx Config Generator
-- [ ] Generate ONE config per ProjectGroup (not per Project)
-- [ ] Route structure:
+#### 1.3 Update Nginx Config Generator ✅
+- [x] Generate ONE config per ProjectGroup (not per Project)
+- [x] Route structure:
   ```nginx
   server {
       server_name {slug}.{domain};
@@ -313,9 +343,10 @@ model Database {
       }
   }
   ```
-- [ ] Handle cases: only frontend, only backend, both
-- [ ] Update on any component add/remove
-- [ ] Always include `/uploads/` and `/media/` locations (VPSBuild-managed)
+- [x] Handle cases: only frontend, only backend, both
+- [x] Update on any component add/remove
+- [x] Always include `/uploads/` and `/media/` locations (VPSBuild-managed)
+- [x] Added legacy function for backward compatibility
 
 ### Phase 2: Frontend Updates
 
@@ -393,16 +424,17 @@ model Database {
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-#### 2.9 Backend File Upload Routes
-- [ ] POST `/api/files/:groupId/upload` - Upload file(s)
+#### 2.9 Backend File Upload Routes ✅ COMPLETED
+- [x] POST `/api/files/:groupId/upload` - Upload file(s)
   - Accept: multipart/form-data
   - Query param: `folder=uploads|media`
   - Saves to: `/var/www/{slug}/{folder}/`
-- [ ] GET `/api/files/:groupId` - List files
+- [x] GET `/api/files/:groupId` - List files
   - Query param: `folder=uploads|media`
-- [ ] DELETE `/api/files/:groupId/:filename` - Delete file
+- [x] DELETE `/api/files/:groupId/:filename` - Delete file
   - Query param: `folder=uploads|media`
-- [ ] Create folders on project creation: `uploads/` and `media/`
+- [x] Create folders on project creation: `uploads/` and `media/`
+- [x] Added route to `index.js`: `/api/files`
 
 #### 2.10 File Storage Structure
 ```
@@ -538,23 +570,25 @@ Project: "bomf"
 - `vps-front/src/pages/GroupView.jsx` → `ProjectView.jsx`
 
 ### Files to Create
-- `vps-front/src/components/FrontendCard.jsx`
-- `vps-front/src/components/BackendCard.jsx`
-- `vps-front/src/components/DatabaseCard.jsx`
-- `vps-front/src/components/AddComponentWizard.jsx`
-- `vps-front/src/components/FileManager.jsx` - Uploads/media file management
-- `vps-back/src/routes/files.js` - File upload/list/delete routes
+- [ ] `vps-front/src/components/FrontendCard.jsx`
+- [ ] `vps-front/src/components/BackendCard.jsx`
+- [ ] `vps-front/src/components/DatabaseCard.jsx`
+- [ ] `vps-front/src/components/AddComponentWizard.jsx`
+- [ ] `vps-front/src/components/FileManager.jsx` - Uploads/media file management
+- [x] `vps-back/src/routes/files.js` - File upload/list/delete routes ✅ CREATED
 
 ### Files to Modify
-- `vps-back/prisma/schema.prisma`
-- `vps-back/src/routes/groups.js`
-- `vps-back/src/routes/projects.js`
-- `vps-back/src/routes/databases.js`
-- `vps-back/src/routes/deployments.js`
-- `vps-back/src/lib/nginx-config-generator.js`
-- `vps-front/src/App.jsx`
-- `vps-front/src/pages/Dashboard.jsx`
-- `vps-front/src/components/DeploymentWizard.jsx`
+- [x] `vps-back/prisma/schema.prisma` ✅ MODIFIED
+- [x] `vps-back/src/routes/groups.js` ✅ MODIFIED
+- [x] `vps-back/src/routes/projects.js` ✅ MODIFIED
+- [x] `vps-back/src/routes/databases.js` ✅ MODIFIED
+- [ ] `vps-back/src/routes/deployments.js`
+- [x] `vps-back/src/lib/nginx-config-generator.js` ✅ MODIFIED
+- [x] `vps-back/src/index.js` ✅ MODIFIED (added files route)
+- [x] `vps-back/Dockerfile` ✅ MODIFIED (auto prisma db push on startup)
+- [ ] `vps-front/src/App.jsx`
+- [ ] `vps-front/src/pages/Dashboard.jsx`
+- [ ] `vps-front/src/components/DeploymentWizard.jsx`
 
 ---
 

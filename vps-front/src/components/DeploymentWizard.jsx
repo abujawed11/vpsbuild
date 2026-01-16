@@ -5,7 +5,7 @@ import { apiFetch } from "../lib/api";
 // Reserved environment variable keys that are system-managed
 const RESERVED_KEYS = ['PORT', 'NODE_ENV', 'HOST'];
 
-export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
+export default function DeploymentWizard({ onComplete, onCancel, groupId, role, groupSlug }) {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     const [envError, setEnvError] = useState("");
@@ -19,8 +19,10 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
     // Step 2: Create Site
     const [siteName, setSiteName] = useState("");
+    // When role is provided, we don't need a custom slug - it's derived from groupSlug + role
     const [siteSlug, setSiteSlug] = useState("");
-    const [siteType, setSiteType] = useState("static"); // static, server
+    // When role is provided, site type is pre-determined (FRONTEND -> static, BACKEND -> server)
+    const [siteType, setSiteType] = useState(role === "BACKEND" ? "server" : "static");
 
     // Step 3a: GitHub Source
     const [repos, setRepos] = useState([]);
@@ -63,9 +65,13 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     // Effects
     useEffect(() => {
         if (siteName && step === 2) {
-            setSiteSlug(siteName.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50));
+            // When role is provided, slug is handled by backend (groupSlug-role)
+            // Only set siteSlug for legacy standalone projects
+            if (!role) {
+                setSiteSlug(siteName.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50));
+            }
         }
-    }, [siteName, step]);
+    }, [siteName, step, role]);
 
     const fetchRepos = async () => {
         setLoading(true);
@@ -89,16 +95,29 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
     const createProject = async () => {
         setLoading(true);
         try {
-            const res = await apiFetch("/projects/import", {
-                method: "POST",
-                token: getToken(),
-                body: { 
-                    repoFullName: selectedRepo.full_name, 
+            // For role-based deployment, use POST /projects which handles role + groupId
+            // For legacy, use POST /projects/import
+            const endpoint = role ? "/projects" : "/projects/import";
+            const body = role
+                ? {
+                    repoFullName: selectedRepo.full_name,
+                    branch: selectedBranch,
+                    name: siteName,
+                    groupId,
+                    role
+                }
+                : {
+                    repoFullName: selectedRepo.full_name,
                     branch: selectedBranch,
                     name: siteName,
                     slug: siteSlug,
                     groupId
-                }
+                };
+
+            const res = await apiFetch(endpoint, {
+                method: "POST",
+                token: getToken(),
+                body
             });
             setProjectId(res.project.id);
             setProjectData(res.project);
@@ -118,16 +137,23 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
         setLoading(true);
         try {
             // Create project first
+            const body = {
+                name: siteName,
+                groupId,
+                repoFullName: "uploaded-zip",
+                branch: "main"
+            };
+            // Add role if provided, otherwise add slug for legacy flow
+            if (role) {
+                body.role = role;
+            } else {
+                body.slug = siteSlug;
+            }
+
             const res = await apiFetch("/projects", {
                 method: "POST",
                 token: getToken(),
-                body: {
-                    name: siteName,
-                    slug: siteSlug,
-                    groupId,
-                    repoFullName: "uploaded-zip",
-                    branch: "main"
-                }
+                body
             });
 
             setProjectId(res.project.id);
@@ -486,57 +512,90 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
 
             {step === 2 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 2: Name Your Site</h3>
-                    <p style={stepDesc}>Give your project a name. We'll generate a unique URL for it.</p>
+                    <h3 style={stepTitle}>Step 2: {role ? `Configure ${role === "FRONTEND" ? "Frontend" : "Backend"}` : "Name Your Site"}</h3>
+                    <p style={stepDesc}>
+                        {role
+                            ? `Give your ${role.toLowerCase()} a name for identification.`
+                            : "Give your project a name. We'll generate a unique URL for it."
+                        }
+                    </p>
 
-                    <div style={{ marginBottom: 20 }}>
-                        <label style={labelStyle}>Project Type</label>
-                        <div style={{ display: "flex", gap: 10 }}>
-                             <button
-                                onClick={() => setSiteType("static")}
-                                style={{
-                                    flex: 1, padding: 15, borderRadius: 8, border: siteType === "static" ? "2px solid #2196F3" : "1px solid #ddd",
-                                    background: siteType === "static" ? "#e3f2fd" : "white", cursor: "pointer", textAlign: "center"
-                                }}
-                             >
-                                <strong>Static Website</strong>
-                                <div style={{ fontSize: "0.8em", color: "#666" }}>React, Vue, Static HTML</div>
-                             </button>
-                             <button
-                                onClick={() => setSiteType("server")}
-                                style={{
-                                    flex: 1, padding: 15, borderRadius: 8, border: siteType === "server" ? "2px solid #2196F3" : "1px solid #ddd",
-                                    background: siteType === "server" ? "#e3f2fd" : "white", cursor: "pointer", textAlign: "center"
-                                }}
-                             >
-                                <strong>Host Server</strong>
-                                <div style={{ fontSize: "0.8em", color: "#666" }}>Node.js, Python, Docker</div>
-                             </button>
+                    {/* Only show project type selector when role is NOT provided (legacy flow) */}
+                    {!role && (
+                        <div style={{ marginBottom: 20 }}>
+                            <label style={labelStyle}>Project Type</label>
+                            <div style={{ display: "flex", gap: 10 }}>
+                                 <button
+                                    onClick={() => setSiteType("static")}
+                                    style={{
+                                        flex: 1, padding: 15, borderRadius: 8, border: siteType === "static" ? "2px solid #2196F3" : "1px solid #ddd",
+                                        background: siteType === "static" ? "#e3f2fd" : "white", cursor: "pointer", textAlign: "center"
+                                    }}
+                                 >
+                                    <strong>Static Website</strong>
+                                    <div style={{ fontSize: "0.8em", color: "#666" }}>React, Vue, Static HTML</div>
+                                 </button>
+                                 <button
+                                    onClick={() => setSiteType("server")}
+                                    style={{
+                                        flex: 1, padding: 15, borderRadius: 8, border: siteType === "server" ? "2px solid #2196F3" : "1px solid #ddd",
+                                        background: siteType === "server" ? "#e3f2fd" : "white", cursor: "pointer", textAlign: "center"
+                                    }}
+                                 >
+                                    <strong>Host Server</strong>
+                                    <div style={{ fontSize: "0.8em", color: "#666" }}>Node.js, Python, Docker</div>
+                                 </button>
+                            </div>
                         </div>
-                    </div>
+                    )}
+
+                    {/* Show pre-selected type info when role is provided */}
+                    {role && (
+                        <div style={{ marginBottom: 20, padding: 12, background: "#e3f2fd", borderRadius: 8, border: "1px solid #bbdefb" }}>
+                            <span style={{ color: "#1565c0", fontWeight: 500 }}>
+                                {role === "FRONTEND" ? "🌐 Frontend (Static Website)" : "⚙️ Backend (Server Application)"}
+                            </span>
+                        </div>
+                    )}
 
                     <div style={{ marginBottom: 20 }}>
-                        <label style={labelStyle}>Site Name</label>
+                        <label style={labelStyle}>{role ? `${role === "FRONTEND" ? "Frontend" : "Backend"} Name` : "Site Name"}</label>
                         <input
                             value={siteName}
                             onChange={e => setSiteName(e.target.value)}
-                            placeholder="My Awesome Site"
+                            placeholder={role ? `My ${role === "FRONTEND" ? "Frontend" : "Backend"}` : "My Awesome Site"}
                             style={inputStyle}
                             autoFocus
                         />
                     </div>
-                    <div style={{ marginBottom: 25 }}>
-                        <label style={labelStyle}>Site URL</label>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f5f5f5", padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd" }}>
-                            <span style={{ color: "#888" }}>http://</span>
-                            <input
-                                value={siteSlug}
-                                onChange={e => setSiteSlug(e.target.value)}
-                                style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }}
-                            />
-                            <span style={{ color: "#888" }}>.{baseDomain}{basePort}</span>
+
+                    {/* Only show URL/slug input when role is NOT provided (legacy flow) */}
+                    {!role && (
+                        <div style={{ marginBottom: 25 }}>
+                            <label style={labelStyle}>Site URL</label>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f5f5f5", padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd" }}>
+                                <span style={{ color: "#888" }}>http://</span>
+                                <input
+                                    value={siteSlug}
+                                    onChange={e => setSiteSlug(e.target.value)}
+                                    style={{ ...inputStyle, border: "none", background: "transparent", padding: 0, fontWeight: 500 }}
+                                />
+                                <span style={{ color: "#888" }}>.{baseDomain}{basePort}</span>
+                            </div>
                         </div>
-                    </div>
+                    )}
+
+                    {/* Show project URL info when role is provided */}
+                    {role && groupSlug && (
+                        <div style={{ marginBottom: 25, padding: 12, background: "#f5f5f5", borderRadius: 8, border: "1px solid #ddd" }}>
+                            <label style={{ ...labelStyle, marginBottom: 8 }}>Project URL</label>
+                            <div style={{ fontFamily: "monospace", fontSize: "0.9em" }}>
+                                <span style={{ color: "#2196F3" }}>http://{groupSlug}.{baseDomain}{basePort}</span>
+                                <span style={{ color: "#666" }}>{role === "BACKEND" ? "/api/*" : "/"}</span>
+                            </div>
+                        </div>
+                    )}
+
                     <div style={{ display: "flex", gap: 10 }}>
                         <button onClick={() => setStep(1)} style={secondaryBtn}>← Back</button>
                         <button
@@ -546,7 +605,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                                 }
                                 setStep(3);
                             }}
-                            disabled={!siteSlug}
+                            disabled={!siteName || (!role && !siteSlug)}
                             style={primaryBtn}
                         >
                             Next: {sourceType === "github" ? "Choose Repository" : "Upload Files"} →
@@ -1018,23 +1077,23 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId }) {
                     </div>
                     
                     {deployment?.status === "DEPLOYED" && (() => {
-                        const slug = projectData?.slug || siteSlug;
-                        // Both server and frontend now use subdomain-based routing
+                        // For role-based deployment, use groupSlug; otherwise use project slug
+                        const slug = role ? groupSlug : (projectData?.slug || siteSlug);
                         const siteUrl = `http://${slug}.${baseDomain}${basePort}`;
                         const siteLabel = `${slug}.${baseDomain}${basePort}`;
 
                         return (
                             <div style={{ marginTop: 25, textAlign: "center", padding: 20, background: "#e8f5e9", borderRadius: 8, border: "1px solid #c8e6c9" }}>
                                 <h2 style={{ color: "#2e7d32", marginTop: 0 }}>Deployment Complete! 🎉</h2>
-                                <p>Your site is verified and live.</p>
+                                <p>Your {role ? role.toLowerCase() : "site"} is verified and live.</p>
                                 <a href={siteUrl} target="_blank" rel="noreferrer" style={{
                                     display: "inline-block", marginTop: 10, padding: "10px 20px",
                                     background: "#2e7d32", color: "white", textDecoration: "none", borderRadius: 6, fontWeight: "bold"
                                 }}>
-                                    Visit {siteLabel}
+                                    Visit {siteLabel}{role === "BACKEND" ? "/api" : ""}
                                 </a>
                                 <div style={{ marginTop: 15 }}>
-                                    <button onClick={onComplete} style={{ background: "transparent", border: "none", textDecoration: "underline", cursor: "pointer", color: "#2e7d32" }}>Back to Dashboard</button>
+                                    <button onClick={onComplete} style={{ background: "transparent", border: "none", textDecoration: "underline", cursor: "pointer", color: "#2e7d32" }}>Back to Project</button>
                                 </div>
                             </div>
                         );
