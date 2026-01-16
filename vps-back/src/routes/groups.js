@@ -236,7 +236,13 @@ router.get("/:id", authRequired, async (req, res) => {
         const frontend = group.projects.find(p => p.role === 'FRONTEND');
         const backend = group.projects.find(p => p.role === 'BACKEND');
 
-        const baseDomain = process.env.BASE_DOMAIN || '93.127.199.118.sslip.io';
+        const baseDomain = process.env.BASE_DOMAIN || "93.127.199.118.sslip.io";
+        const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${baseDomain}`;
+        const urlMatch = publicBaseUrl.match(/^(https?):\/\/([^:/]+)(:\d+)?/);
+        const protocol = urlMatch ? urlMatch[1] : "http";
+        const domain = urlMatch ? urlMatch[2] : baseDomain;
+        const port = urlMatch && urlMatch[3] ? urlMatch[3] : "";
+        const groupUrl = `${protocol}://${group.slug}.${domain}${port}`;
 
         const formatProject = (p) => {
             if (!p) return null;
