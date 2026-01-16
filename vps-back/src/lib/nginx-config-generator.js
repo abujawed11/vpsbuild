@@ -79,20 +79,14 @@ function generateNginxServerConfig(projectGroup) {
 
     // Frontend routes (if frontend is deployed)
     if (frontend) {
-        const frontendPort = frontend.port || 80;
-        const frontendContainer = `${slug}-frontend`;
+        const frontendRoot = `${staticSitesPath}/${slug}/current`;
 
         locationBlocks += `
     # Frontend SPA → Frontend container
+    root ${frontendRoot};
+    index index.html;
     location / {
-        set $frontend "${frontendContainer}";
-        proxy_pass http://$frontend:${frontendPort};
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_redirect off;
+        try_files $uri $uri/ /index.html;
     }
 `;
     } else if (backend && !frontend) {
@@ -187,7 +181,13 @@ async function writeNginxConfig(project) {
     await fs.mkdir(nginxProjectsDir, { recursive: true });
 
     const configPath = path.join(nginxProjectsDir, `${slug}.conf`);
-    const configContent = generateNginxServerConfig(project);
+    const isGroupConfig =
+        Object.prototype.hasOwnProperty.call(project, "apiPathPrefix") ||
+        Object.prototype.hasOwnProperty.call(project, "frontend") ||
+        Object.prototype.hasOwnProperty.call(project, "backend");
+    const configContent = isGroupConfig
+        ? generateNginxServerConfig(project)
+        : generateNginxServerConfigLegacy(project);
 
     await fs.writeFile(configPath, configContent, 'utf8');
 

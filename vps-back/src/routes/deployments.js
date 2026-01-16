@@ -582,13 +582,39 @@ async function runServerDeploy(project, deploymentId) {
 
         // Generate nginx config with effective port (from env vars or build settings)
         await updateLogs("=== CONFIGURING GATEWAY ===");
-        const projectWithEffectivePort = { ...project, port: effectivePort };
-        const configPath = await writeNginxConfig(projectWithEffectivePort);
+        let nginxTarget = { ...project, port: effectivePort };
+        let groupForUrls = null;
+
+        if (project.groupId) {
+            const group = await prisma.projectGroup.findUnique({
+                where: { id: project.groupId },
+                include: { projects: true }
+            });
+
+            if (group) {
+                const frontendProject = group.projects.find(p => p.role === "FRONTEND");
+                const backendProject = group.projects.find(p => p.role === "BACKEND");
+                const hasDeployedFrontend = frontendProject?.deploymentStatus === "DEPLOYED";
+
+                nginxTarget = {
+                    slug: group.slug,
+                    apiPathPrefix: group.apiPathPrefix || "/api",
+                    frontend: hasDeployedFrontend ? {} : null,
+                    backend: backendProject ? {
+                        port: backendProject.id === project.id ? effectivePort : (backendProject.port || 3000)
+                    } : null
+                };
+
+                groupForUrls = group;
+            }
+        }
+
+        const configPath = await writeNginxConfig(nginxTarget);
         await updateLogs(`Config created: ${configPath}`);
 
         // Reload nginx with validation
         await updateLogs("Reloading nginx...");
-        const reloadResult = await reloadNginx(project);
+        const reloadResult = await reloadNginx(nginxTarget);
 
         if (reloadResult.success) {
             await updateLogs("[OK] Nginx reloaded");
@@ -602,12 +628,23 @@ async function runServerDeploy(project, deploymentId) {
 
         await updateLogs("=== DEPLOYMENT COMPLETE ===");
 
-        // Construct subdomain URL
-        const baseDomain = process.env.BASE_DOMAIN || 'localhost';
-        const port = process.env.PUBLIC_BASE_URL?.includes(':8088') ? ':8088' : '';
-        const publicUrl = `http://${project.slug}.${baseDomain}${port}`;
+        // Construct public URLs
+        const baseDomain = process.env.BASE_DOMAIN || "localhost";
+        const fallbackPort = process.env.PUBLIC_BASE_URL?.includes(":8088") ? ":8088" : "";
+        const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${baseDomain}${fallbackPort}`;
+        const urlMatch = publicBaseUrl.match(/^(https?):\/\/([^:/]+)(:\d+)?/);
+        const protocol = urlMatch ? urlMatch[1] : "http";
+        const domain = urlMatch ? urlMatch[2] : baseDomain;
+        const portSuffix = urlMatch && urlMatch[3] ? urlMatch[3] : fallbackPort;
 
-        await updateLogs(`✓ Server live at: ${publicUrl}`);
+        const groupSlug = groupForUrls?.slug;
+        const hostSlug = groupSlug || project.slug;
+        const hostUrl = `${protocol}://${hostSlug}.${domain}${portSuffix}`;
+        const apiPrefix = groupForUrls?.apiPathPrefix || "/api";
+        const apiUrl = groupSlug ? `${hostUrl}${apiPrefix}` : hostUrl;
+
+        await updateLogs(`✓ Live URL: ${hostUrl}`);
+        await updateLogs(`✓ API URL: ${apiUrl}`);
         await updateLogs(`✓ Container: ${project.slug}`);
 
     } catch (err) {
@@ -779,7 +816,15 @@ async function runBuild(project, deploymentId) {
         await prisma.deployment.update({ where: { id: deploymentId }, data: { status: "FINALIZING" } });
         await updateLogs("=== FINALIZE PHASE ===");
 
-        const sitePath = path.join(BASE_STATIC_PATH, project.slug);
+        let siteSlug = project.slug;
+        if (project.groupId && project.role === "FRONTEND") {
+            const group = await prisma.projectGroup.findUnique({ where: { id: project.groupId } });
+            if (group?.slug) {
+                siteSlug = group.slug;
+            }
+        }
+
+        const sitePath = path.join(BASE_STATIC_PATH, siteSlug);
         const releasesPath = path.join(sitePath, "releases");
         const currentReleasePath = path.join(releasesPath, deploymentId);
 
@@ -880,6 +925,36 @@ async function runBuild(project, deploymentId) {
         await prisma.project.update({ where: { id: project.id }, data: { deploymentStatus: "DEPLOYED" } });
         await updateLogs("=== DEPLOYMENT COMPLETE ===");
 
+        // For project groups: ensure the group subdomain routes to the deployed frontend (and API if backend exists)
+        if (project.groupId && project.role === "FRONTEND") {
+            await updateLogs("=== CONFIGURING GATEWAY ===");
+            const group = await prisma.projectGroup.findUnique({
+                where: { id: project.groupId },
+                include: { projects: true }
+            });
+
+            if (group) {
+                const backendProject = group.projects.find(p => p.role === "BACKEND");
+                const hasDeployedBackend = backendProject?.deploymentStatus === "DEPLOYED";
+
+                const nginxTarget = {
+                    slug: group.slug,
+                    apiPathPrefix: group.apiPathPrefix || "/api",
+                    frontend: {},
+                    backend: hasDeployedBackend ? { port: backendProject.port || 3000 } : null
+                };
+
+                const configPath = await writeNginxConfig(nginxTarget);
+                await updateLogs(`Config created: ${configPath}`);
+
+                await updateLogs("Reloading nginx...");
+                const reloadResult = await reloadNginx(nginxTarget);
+                if (reloadResult.success) {
+                    await updateLogs("[OK] Nginx reloaded");
+                }
+            }
+        }
+
         // Get base domain from environment (without protocol or port)
         const baseDomain = process.env.VITE_BASE_DOMAIN || process.env.BASE_DOMAIN || 'localhost';
         const publicUrl = process.env.PUBLIC_BASE_URL || `http://${baseDomain}`;
@@ -888,7 +963,8 @@ async function runBuild(project, deploymentId) {
         const domain = urlMatch ? urlMatch[1] : baseDomain;
         const port = urlMatch && urlMatch[2] ? urlMatch[2] : '';
 
-        await updateLogs(`✓ Your site is now live at: http://${project.slug}.${domain}${port}`);
+        const protocol = urlMatch ? (publicUrl.startsWith("https://") ? "https" : "http") : "http";
+        await updateLogs(`✓ Your site is now live at: ${protocol}://${siteSlug}.${domain}${port}`);
         await updateLogs(`✓ Deployment ID: ${deploymentId}`);
 
     } catch (err) {

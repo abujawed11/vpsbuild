@@ -144,7 +144,13 @@ router.post("/", authRequired, async (req, res) => {
         });
 
         // Create uploads and media directories for this project
-        const baseDomain = process.env.BASE_DOMAIN || '93.127.199.118.sslip.io';
+        const baseDomain = process.env.BASE_DOMAIN || "93.127.199.118.sslip.io";
+        const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://${baseDomain}`;
+        const urlMatch = publicBaseUrl.match(/^(https?):\/\/([^:\/]+)(:\d+)?/);
+        const protocol = urlMatch ? urlMatch[1] : "http";
+        const domain = urlMatch ? urlMatch[2] : baseDomain;
+        const port = urlMatch && urlMatch[3] ? urlMatch[3] : "";
+        const groupUrl = `${protocol}://${group.slug}.${domain}${port}`;
         const staticSitesPath = process.env.STATIC_SITES_PATH || '/srv/static-sites';
         const projectDir = path.join(staticSitesPath, slug);
 
@@ -244,7 +250,7 @@ router.get("/:id", authRequired, async (req, res) => {
 
         res.json({
             ...group,
-            url: `https://${group.slug}.${baseDomain}`,
+            url: groupUrl,
             hasFrontend: !!frontend,
             hasBackend: !!backend,
             hasDatabase: !!group.database,

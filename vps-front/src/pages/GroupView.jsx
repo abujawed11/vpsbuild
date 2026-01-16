@@ -157,7 +157,14 @@ export default function GroupView() {
     if (err) return <div style={{ padding: 40, textAlign: "center" }}>Error: {err}</div>;
     if (!group) return <div style={{ padding: 40 }}>Loading...</div>;
 
-    const projectUrl = group.slug ? `http://${group.slug}.${BASE_DOMAIN}${BASE_PORT}` : null;
+    const rawProjectUrl = group.url || (group.slug ? `http://${group.slug}.${BASE_DOMAIN}` : null);
+    const projectUrl = rawProjectUrl && BASE_PORT && /^https?:\/\//.test(rawProjectUrl) && !/:\d+(\/|$)/.test(rawProjectUrl.replace(/^https?:\/\//, ""))
+        ? rawProjectUrl.replace(/^(https?:\/\/[^/]+)/, `$1${BASE_PORT}`)
+        : (rawProjectUrl ? `${rawProjectUrl}${rawProjectUrl.includes("://") ? "" : BASE_PORT}` : null);
+    const projectUrlText = projectUrl ? projectUrl.replace(/^https?:\/\//, "") : "";
+    const apiPrefix = group.apiPathPrefix || "/api";
+    const apiUrl = projectUrl ? `${projectUrl}${apiPrefix.startsWith("/") ? apiPrefix : `/${apiPrefix}`}` : null;
+    const apiUrlText = apiUrl ? apiUrl.replace(/^https?:\/\//, "") : "";
 
     return (
         <div style={{ maxWidth: 1000, margin: "40px auto", padding: 16 }}>
@@ -175,7 +182,7 @@ export default function GroupView() {
                     <div style={{ display: "flex", alignItems: "center", gap: 15, color: "#666" }}>
                         <span>
                             URL: <a href={projectUrl} target="_blank" rel="noreferrer" style={{ color: "#2196F3" }}>
-                                {group.slug}.{BASE_DOMAIN}{BASE_PORT}
+                                {projectUrlText}
                             </a>
                         </span>
                         <span>|</span>
@@ -247,6 +254,8 @@ export default function GroupView() {
                         onRedeploy={() => redeployComponent(group.frontend?.id, "Frontend")}
                         onManageFiles={() => setManagingFilesProjectId(group.frontend?.id)}
                         onEditEnv={() => setEditingEnvProjectId(group.frontend?.id)}
+                        url={projectUrl}
+                        urlText={projectUrlText}
                     />
 
                     {/* Backend Card */}
@@ -264,6 +273,8 @@ export default function GroupView() {
                         onEditEnv={() => setEditingEnvProjectId(group.backend?.id)}
                         onExecuteScript={() => setExecutingScriptProjectId(group.backend?.id)}
                         showExecuteScript
+                        url={apiUrl}
+                        urlText={apiUrlText}
                     />
 
                     {/* Database Card */}
@@ -322,7 +333,9 @@ function ComponentCard({
     onManageFiles,
     onEditEnv,
     onExecuteScript,
-    showExecuteScript
+    showExecuteScript,
+    url,
+    urlText
 }) {
     const [menuOpen, setMenuOpen] = useState(false);
 
@@ -446,6 +459,14 @@ function ComponentCard({
 
             {/* Info */}
             <div style={{ fontSize: "0.9em", color: "#666" }}>
+                {url && (
+                    <div>
+                        {(title === "Backend" ? "API URL" : "URL")}:{" "}
+                        <a href={url} target="_blank" rel="noreferrer" style={{ color: "#2196F3" }}>
+                            {urlText || url}
+                        </a>
+                    </div>
+                )}
                 {component?.framework && <div>Framework: {component.framework}</div>}
                 {component?.port && <div>Port: {component.port}</div>}
             </div>
