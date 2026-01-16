@@ -533,8 +533,9 @@ export default function DatabaseManagement() {
                         </div>
                     )}
 
-                    {/* Linked Project */}
-                    <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20 }}>
+                    {/* Linked Project (legacy only) */}
+                    {!database.groupId ? (
+                        <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20 }}>
                         <h3 style={{ margin: "0 0 16px 0" }}>Linked Project</h3>
                         {database.project ? (
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "white", padding: 12, borderRadius: 6, border: "1px solid #e0e0e0" }}>
@@ -562,7 +563,15 @@ export default function DatabaseManagement() {
                                 </div>
                             </div>
                         )}
-                    </div>
+                        </div>
+                    ) : (
+                        <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20 }}>
+                            <h3 style={{ margin: "0 0 16px 0" }}>Project Group</h3>
+                            <p style={{ margin: 0, color: "#666", fontSize: "0.9em" }}>
+                                This database is scoped to a project group. Use the Backend card → Environment modal to add the DB URL to env vars.
+                            </p>
+                        </div>
+                    )}
                 </div>
             )}
 

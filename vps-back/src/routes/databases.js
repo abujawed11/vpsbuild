@@ -662,19 +662,51 @@ router.post("/:id/link-project", authRequired, async (req, res) => {
             return res.status(404).json({ error: "Project not found" });
         }
 
-        if (project.databaseId) {
+        // Group-scoped databases are "one per project group".
+        // In that model, linking is only used to inject env vars (not to create a persistent 1:1 project link).
+        if (database.groupId) {
+            if (project.groupId !== database.groupId) {
+                return res.status(400).json({ error: "Project must be in the same group as this database" });
+            }
+            if (project.role === "FRONTEND") {
+                return res.status(400).json({ error: "Database env vars should be added to the Backend project" });
+            }
+
+            // Clean up any legacy linkage so this doesn't get stuck in "already linked" state.
+            await prisma.project.updateMany({
+                where: { databaseId: database.id },
+                data: { databaseId: null }
+            }).catch(() => {});
+            await prisma.database.update({
+                where: { id: database.id },
+                data: { linkedProjectId: null }
+            }).catch(() => {});
+        }
+
+        if (!database.groupId && project.databaseId) {
             return res.status(400).json({ error: "Project already has a database linked" });
         }
 
         if (database.linkedProjectId && database.linkedProjectId !== projectId) {
-            return res.status(400).json({ error: "Database is already linked to a project" });
+            const linked = await prisma.project.findUnique({ where: { id: database.linkedProjectId } }).catch(() => null);
+            if (linked) {
+                return res.status(400).json({ error: "Database is already linked to a project" });
+            }
+            // Stale linkedProjectId - clear and proceed.
+            await prisma.database.update({
+                where: { id: database.id },
+                data: { linkedProjectId: null }
+            }).catch(() => {});
         }
 
-        // Link database to project
-        await prisma.project.update({
-            where: { id: projectId },
-            data: { databaseId: database.id }
-        });
+        // For group-scoped DBs, don't persist a 1:1 project link; only inject env vars.
+        if (!database.groupId) {
+            // Link database to project
+            await prisma.project.update({
+                where: { id: projectId },
+                data: { databaseId: database.id }
+            });
+        }
 
         const dbPassword = await getDbPasswordPlain(database);
         const { primary, compat } = getEnvKeysForType(database.type);
@@ -710,14 +742,16 @@ router.post("/:id/link-project", authRequired, async (req, res) => {
             });
         }
 
-        await prisma.database.update({
-            where: { id: database.id },
-            data: { linkedProjectId: projectId }
-        });
+        if (!database.groupId) {
+            await prisma.database.update({
+                where: { id: database.id },
+                data: { linkedProjectId: projectId }
+            });
+        }
 
         res.json({
             success: true,
-            message: "Database linked to project",
+            message: database.groupId ? "Database env vars added to project" : "Database linked to project",
             envVarAdded: true,
             redeployRecommended: true,
             envKeys: compat ? [primary, compat] : [primary]
@@ -745,6 +779,14 @@ router.post("/:id/unlink-project", authRequired, async (req, res) => {
         });
 
         if (!linkedProject) {
+            // If linkage is stale, clear and return success.
+            if (database.linkedProjectId) {
+                await prisma.database.update({
+                    where: { id: database.id },
+                    data: { linkedProjectId: null }
+                }).catch(() => {});
+                return res.json({ success: true, message: "Cleared stale database linkage" });
+            }
             return res.status(400).json({ error: "Database is not linked to any project" });
         }
 

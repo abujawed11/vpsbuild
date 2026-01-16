@@ -431,11 +431,23 @@ router.delete("/:id", authRequired, async (req, res) => {
 
         console.log(`[Delete] Starting deletion for project: ${project.name} (${project.id})`);
 
+        // Clear stale database linkage (legacy linkedProjectId)
+        await prisma.database.updateMany({
+            where: { linkedProjectId: project.id },
+            data: { linkedProjectId: null }
+        }).catch(() => {});
+
         // 2. Delete static site files (releases + symlink)
         if (project.slug) {
+            let staticSiteSlug = project.slug;
+            if (project.groupId && project.role === "FRONTEND") {
+                const group = await prisma.projectGroup.findUnique({ where: { id: project.groupId } });
+                if (group?.slug) staticSiteSlug = group.slug;
+            }
+
             const staticSitePath = path.join(
                 process.env.STATIC_SITES_PATH || "/srv/static-sites",
-                project.slug
+                staticSiteSlug
             );
 
             if (fsSync.existsSync(staticSitePath)) {
@@ -485,7 +497,12 @@ router.delete("/:id", authRequired, async (req, res) => {
             try {
                 const { removeNginxConfig } = require("../lib/nginx-config-generator");
                 console.log(`[Delete] Removing nginx config for: ${project.slug}`);
-                await removeNginxConfig(project.slug);
+                let nginxSlug = project.slug;
+                if (project.groupId && project.role === "FRONTEND") {
+                    const group = await prisma.projectGroup.findUnique({ where: { id: project.groupId } });
+                    if (group?.slug) nginxSlug = group.slug;
+                }
+                await removeNginxConfig(nginxSlug);
                 console.log(`[Delete] Nginx config removed successfully`);
             } catch (err) {
                 console.error(`[Delete] Nginx config cleanup error (non-fatal): ${err.message}`);
