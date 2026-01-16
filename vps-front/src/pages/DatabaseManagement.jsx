@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 import SqlEditor from "../components/SqlEditor";
@@ -9,6 +9,9 @@ import DangerConfirmModal from "../components/DangerConfirmModal";
 export default function DatabaseManagement() {
     const { id } = useParams();
     const nav = useNavigate();
+    const location = useLocation();
+    const fromGroupId = new URLSearchParams(location.search).get("groupId");
+    const backPath = fromGroupId ? `/groups/${fromGroupId}` : "/databases";
     const [database, setDatabase] = useState(null);
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -54,7 +57,7 @@ export default function DatabaseManagement() {
             setStats(statsRes);
         } catch (e) {
             console.error(e);
-            nav("/databases");
+            nav(backPath);
         } finally {
             setLoading(false);
         }
@@ -380,7 +383,7 @@ export default function DatabaseManagement() {
             {/* Header */}
             <div style={{ marginBottom: 24 }}>
                 <button
-                    onClick={() => nav("/databases")}
+                    onClick={() => nav(backPath)}
                     style={{ background: "none", border: "none", color: "#666", cursor: "pointer", fontSize: "0.9em", marginBottom: 10 }}
                 >
                     ← Back to Databases
@@ -932,7 +935,7 @@ export default function DatabaseManagement() {
                                 method: "DELETE",
                                 token: getToken()
                             });
-                            nav("/databases");
+                            nav(backPath);
                         } catch (e) {
                             alert(e.message);
                         } finally {

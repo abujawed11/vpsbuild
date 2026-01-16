@@ -274,7 +274,7 @@ export default function GroupView() {
                         isDeleting={deletingComponent === "database"}
                         onAdd={() => setShowDbModal(true)}
                         onDelete={() => deleteDatabase(group.database?.id)}
-                        onManage={() => nav(`/databases/${group.database?.id}`)}
+                        onManage={() => nav(`/databases/${group.database?.id}?groupId=${groupId}`)}
                     />
                 </div>
             )}
