@@ -22,6 +22,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-supersecretDefault}
       CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:-}
       STATIC_SITES_PATH: /srv/static-sites
+      WORKSPACE_ROOT: /workspaces
       PORT: 5000
       # Single source of truth for public URL
       PUBLIC_BASE_URL: http://93.127.199.118.sslip.io:8088
@@ -31,6 +32,7 @@ services:
       DOCKER_ENV: "true"
     volumes:
       - static_sites:/srv/static-sites
+      - workspaces:/workspaces
       - /var/run/docker.sock:/var/run/docker.sock
       - gateway_projects:/nginx/projects
     depends_on:
@@ -63,6 +65,7 @@ services:
 volumes:
   postgres_data:
   static_sites:
+  workspaces:
   gateway_projects:
 
 networks:
