@@ -9,12 +9,9 @@ const { spawn } = require('child_process');
  */
 function streamCommand(command, options = {}, onOutput) {
     return new Promise((resolve, reject) => {
-        // Parse command and args
-        const parts = command.match(/(?:[^\s"]+|"[^"]*")+/g);
-        const cmd = parts[0];
-        const args = parts.slice(1).map(arg => arg.replace(/^"|"$/g, ''));
-
-        const proc = spawn(cmd, args, {
+        // When using shell: true, pass the entire command as-is to preserve quoting
+        // This properly handles paths with spaces like "/path/to/my project"
+        const proc = spawn(command, [], {
             ...options,
             shell: true,
             stdio: ['ignore', 'pipe', 'pipe']
