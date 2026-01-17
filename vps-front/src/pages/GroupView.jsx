@@ -409,16 +409,22 @@ function ComponentCard({
                 <div style={{
                     position: "absolute",
                     top: 0, left: 0, right: 0, bottom: 0,
-                    background: "rgba(255,255,255,0.9)",
+                    background: "rgba(255,255,255,0.95)",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
                     justifyContent: "center",
                     borderRadius: 12,
-                    zIndex: 10
+                    zIndex: 10,
+                    backdropFilter: "blur(2px)"
                 }}>
-                    <div className="spinner"></div>
-                    <span style={{ marginTop: 10, color: isDeleting ? "#c62828" : "#2196F3" }}>
+                    <div className={`spinner-lg ${isDeleting ? "spinner-danger" : ""}`}></div>
+                    <span className="loading-text" style={{
+                        marginTop: 12,
+                        color: isDeleting ? "#c62828" : "#2196F3",
+                        fontWeight: 500,
+                        fontSize: "0.95em"
+                    }}>
                         {isDeleting ? "Deleting..." : "Redeploying..."}
                     </span>
                 </div>
@@ -548,16 +554,24 @@ function DatabaseCard({ database, hasDatabase, databaseInfo, isDeleting, onAdd, 
                 <div style={{
                     position: "absolute",
                     top: 0, left: 0, right: 0, bottom: 0,
-                    background: "rgba(255,255,255,0.9)",
+                    background: "rgba(255,255,255,0.95)",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
                     justifyContent: "center",
                     borderRadius: 12,
-                    zIndex: 10
+                    zIndex: 10,
+                    backdropFilter: "blur(2px)"
                 }}>
-                    <div className="spinner"></div>
-                    <span style={{ marginTop: 10, color: "#c62828" }}>Deleting...</span>
+                    <div className="spinner-lg spinner-danger"></div>
+                    <span className="loading-text" style={{
+                        marginTop: 12,
+                        color: "#c62828",
+                        fontWeight: 500,
+                        fontSize: "0.95em"
+                    }}>
+                        Deleting...
+                    </span>
                 </div>
             )}
 
