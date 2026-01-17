@@ -247,8 +247,8 @@ export default function GroupView() {
                         icon="🌐"
                         component={group.frontend}
                         hasComponent={group.hasFrontend}
-                        isDeleting={deletingComponent === "frontend"}
-                        isRedeploying={redeployingComponent === "frontend"}
+                        isDeleting={deletingComponent?.toLowerCase() === "frontend"}
+                        isRedeploying={redeployingComponent?.toLowerCase() === "frontend"}
                         onAdd={() => { setWizardRole("FRONTEND"); setShowWizard(true); }}
                         onDelete={() => deleteComponent(group.frontend?.id, "Frontend")}
                         onRedeploy={() => redeployComponent(group.frontend?.id, "Frontend")}
@@ -268,8 +268,8 @@ export default function GroupView() {
                         icon="⚙️"
                         component={group.backend}
                         hasComponent={group.hasBackend}
-                        isDeleting={deletingComponent === "backend"}
-                        isRedeploying={redeployingComponent === "backend"}
+                        isDeleting={deletingComponent?.toLowerCase() === "backend"}
+                        isRedeploying={redeployingComponent?.toLowerCase() === "backend"}
                         onAdd={() => { setWizardRole("BACKEND"); setShowWizard(true); }}
                         onDelete={() => deleteComponent(group.backend?.id, "Backend")}
                         onRedeploy={() => redeployComponent(group.backend?.id, "Backend")}
@@ -290,7 +290,7 @@ export default function GroupView() {
                         database={group.database}
                         hasDatabase={group.hasDatabase}
                         databaseInfo={group.databaseInfo}
-                        isDeleting={deletingComponent === "database"}
+                        isDeleting={deletingComponent?.toLowerCase() === "database"}
                         onAdd={() => setShowDbModal(true)}
                         onDelete={() => deleteDatabase(group.database?.id)}
                         onManage={() => nav(`/databases/${group.database?.id}?groupId=${groupId}`)}

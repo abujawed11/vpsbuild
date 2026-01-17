@@ -18,8 +18,10 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
     const [sourceType, setSourceType] = useState(""); // "github" or "zip"
 
     // Step 2: Create Site
-    // Pre-fill name with role if provided (e.g., "Frontend" or "Backend")
-    const [siteName, setSiteName] = useState(role ? (role === "FRONTEND" ? "Frontend" : "Backend") : "");
+    // Pre-fill name with groupSlug + role to ensure uniqueness (e.g., "mypr Frontend")
+    const [siteName, setSiteName] = useState(
+        role ? `${groupSlug || ''} ${role === "FRONTEND" ? "Frontend" : "Backend"}`.trim() : ""
+    );
     // When role is provided, we don't need a custom slug - it's derived from groupSlug + role
     const [siteSlug, setSiteSlug] = useState("");
     // When role is provided, site type is pre-determined (FRONTEND -> static, BACKEND -> server)
