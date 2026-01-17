@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 
@@ -11,17 +11,17 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const [successMessage, setSuccessMessage] = useState("");
+    const [importMessage, setImportMessage] = useState("");
     const [databases, setDatabases] = useState([]);
     const [dbLoading, setDbLoading] = useState(false);
     const [selectedDbId, setSelectedDbId] = useState("");
     const [linkingDb, setLinkingDb] = useState(false);
 
-    useEffect(() => {
-        fetchEnvVars();
-        fetchDatabases();
-    }, [projectId]);
+    const [envMode, setEnvMode] = useState("manual"); // "manual" | "paste" | "upload"
+    const [pasteText, setPasteText] = useState("");
+    const uploadInputRef = useRef(null);
 
-    const fetchEnvVars = async () => {
+    const fetchEnvVars = useCallback(async () => {
         try {
             setLoading(true);
             const vars = await apiFetch(`/projects/${projectId}/env-vars`, {
@@ -35,9 +35,9 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
         } finally {
             setLoading(false);
         }
-    };
+    }, [projectId]);
 
-    const fetchDatabases = async () => {
+    const fetchDatabases = useCallback(async () => {
         try {
             setDbLoading(true);
             const res = await apiFetch("/databases", { token: getToken() });
@@ -47,7 +47,17 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
         } finally {
             setDbLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        fetchEnvVars();
+        fetchDatabases();
+        setEnvMode("manual");
+        setPasteText("");
+        setImportMessage("");
+        setError("");
+        setSuccessMessage("");
+    }, [fetchEnvVars, fetchDatabases, projectId]);
 
     const attachManagedDatabase = async () => {
         if (!selectedDbId) return;
@@ -90,6 +100,120 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
 
     const handleChangeValue = (id, newValue) => {
         setEnvVars(envVars.map(v => v.id === id ? { ...v, value: newValue } : v));
+    };
+
+    const parseEnvText = (text) => {
+        const parsed = [];
+        const lines = String(text || "").split(/\r?\n/);
+
+        lines.forEach((rawLine) => {
+            let line = String(rawLine || "").trim();
+            if (!line || line.startsWith("#")) return;
+
+            if (line.startsWith("export ")) line = line.slice("export ".length).trim();
+
+            const splitIndex = line.indexOf("=");
+            if (splitIndex === -1) return;
+
+            const key = line.substring(0, splitIndex).trim();
+            let value = line.substring(splitIndex + 1).trim();
+
+            if ((value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.slice(1, -1);
+            }
+
+            if (key) parsed.push({ key, value });
+        });
+
+        return parsed;
+    };
+
+    const mergeParsedVars = (parsedVars, sourceLabel) => {
+        if (!parsedVars || parsedVars.length === 0) return;
+
+        setError("");
+        setSuccessMessage("");
+        setImportMessage("");
+
+        setEnvVars((prev) => {
+            const keyToIndex = new Map();
+            prev.forEach((v, idx) => keyToIndex.set(v.key, idx));
+
+            const next = [...prev];
+            const batchId = Date.now();
+            let added = 0;
+            let updated = 0;
+            let reservedSkipped = 0;
+
+            for (const ev of parsedVars) {
+                const key = (ev?.key || "").trim();
+                const value = String(ev?.value ?? "");
+                if (!key) continue;
+
+                if (RESERVED_KEYS.includes(key.toUpperCase())) {
+                    reservedSkipped++;
+                    continue;
+                }
+
+                if (keyToIndex.has(key)) {
+                    const idx = keyToIndex.get(key);
+                    next[idx] = { ...next[idx], key, value };
+                    updated++;
+                } else {
+                    next.push({ id: `import-${batchId}-${added}`, key, value });
+                    keyToIndex.set(key, next.length - 1);
+                    added++;
+                }
+            }
+
+            if (added === 0 && updated === 0 && reservedSkipped > 0) {
+                setImportMessage(`${sourceLabel}: ${reservedSkipped} reserved variables were skipped (PORT, NODE_ENV, HOST).`);
+            } else if (added === 0 && updated === 0) {
+                setImportMessage(`${sourceLabel}: nothing to import.`);
+            } else {
+                let msg = `${sourceLabel}: ${added} added`;
+                if (updated > 0) msg += `, ${updated} updated`;
+                if (reservedSkipped > 0) msg += ` (${reservedSkipped} reserved skipped)`;
+                setImportMessage(`${msg}.`);
+            }
+
+            return next;
+        });
+    };
+
+    const handlePasteText = () => {
+        if (!pasteText.trim()) return;
+        const parsed = parseEnvText(pasteText);
+        if (parsed.length === 0) {
+            setError("");
+            setSuccessMessage("");
+            setImportMessage("Paste import: nothing to import.");
+            setPasteText("");
+            return;
+        }
+        mergeParsedVars(parsed, "Paste import");
+        setPasteText("");
+    };
+
+    const handleEnvFileUpload = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const content = event.target?.result || "";
+            const parsed = parseEnvText(content);
+            if (parsed.length === 0) {
+                setError("");
+                setSuccessMessage("");
+                setImportMessage("File import: nothing to import.");
+                return;
+            }
+            mergeParsedVars(parsed, "File import");
+        };
+        reader.readAsText(file);
+        e.target.value = null;
     };
 
     const handleApply = async () => {
@@ -274,6 +398,121 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
                     <div style={{ textAlign: "center", padding: 40, color: "#999" }}>Loading...</div>
                 ) : (
                     <div>
+                        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+                            <button
+                                onClick={() => setEnvMode("manual")}
+                                style={{
+                                    flex: 1,
+                                    padding: 10,
+                                    borderRadius: 8,
+                                    border: envMode === "manual" ? "2px solid #2196F3" : "1px solid #ddd",
+                                    background: envMode === "manual" ? "#e3f2fd" : "white",
+                                    cursor: "pointer",
+                                    fontWeight: 600
+                                }}
+                            >
+                                Manual
+                            </button>
+                            <button
+                                onClick={() => setEnvMode("paste")}
+                                style={{
+                                    flex: 1,
+                                    padding: 10,
+                                    borderRadius: 8,
+                                    border: envMode === "paste" ? "2px solid #2196F3" : "1px solid #ddd",
+                                    background: envMode === "paste" ? "#e3f2fd" : "white",
+                                    cursor: "pointer",
+                                    fontWeight: 600
+                                }}
+                            >
+                                Paste Text
+                            </button>
+                            <button
+                                onClick={() => setEnvMode("upload")}
+                                style={{
+                                    flex: 1,
+                                    padding: 10,
+                                    borderRadius: 8,
+                                    border: envMode === "upload" ? "2px solid #2196F3" : "1px solid #ddd",
+                                    background: envMode === "upload" ? "#e3f2fd" : "white",
+                                    cursor: "pointer",
+                                    fontWeight: 600
+                                }}
+                            >
+                                Upload File
+                            </button>
+                        </div>
+
+                        {importMessage && (
+                            <div style={{ marginBottom: 15, padding: 12, background: "#e3f2fd", color: "#0d47a1", borderRadius: 6, fontSize: "0.9em", border: "1px solid #90caf9" }}>
+                                {importMessage}
+                            </div>
+                        )}
+
+                        {envMode === "paste" && (
+                            <div style={{ marginBottom: 15 }}>
+                                <textarea
+                                    placeholder={"Paste env vars here:\nAPI_KEY=abc123\nDATABASE_URL=postgres://...\nPORT=4000"}
+                                    value={pasteText}
+                                    onChange={(e) => setPasteText(e.target.value)}
+                                    style={{
+                                        width: "100%",
+                                        minHeight: 140,
+                                        padding: 10,
+                                        border: "1px solid #ddd",
+                                        borderRadius: 6,
+                                        fontFamily: "monospace",
+                                        resize: "vertical"
+                                    }}
+                                />
+                                <button
+                                    onClick={handlePasteText}
+                                    disabled={saving || !pasteText.trim()}
+                                    style={{
+                                        marginTop: 10,
+                                        background: saving || !pasteText.trim() ? "#bbb" : "#333",
+                                        color: "white",
+                                        padding: "10px 16px",
+                                        borderRadius: 6,
+                                        border: "none",
+                                        cursor: saving || !pasteText.trim() ? "not-allowed" : "pointer",
+                                        fontWeight: 600
+                                    }}
+                                >
+                                    Import from text
+                                </button>
+                            </div>
+                        )}
+
+                        {envMode === "upload" && (
+                            <div style={{ marginBottom: 15 }}>
+                                <input
+                                    ref={uploadInputRef}
+                                    type="file"
+                                    accept=".env,text/plain"
+                                    onChange={handleEnvFileUpload}
+                                    style={{ display: "none" }}
+                                />
+                                <button
+                                    onClick={() => uploadInputRef.current?.click()}
+                                    disabled={saving}
+                                    style={{
+                                        padding: "10px 16px",
+                                        background: "#f5f5f5",
+                                        border: "1px solid #ddd",
+                                        borderRadius: 6,
+                                        cursor: saving ? "not-allowed" : "pointer",
+                                        fontWeight: 600
+                                    }}
+                                >
+                                    Choose .env file
+                                </button>
+                                <div style={{ marginTop: 8, fontSize: "0.85em", color: "#666" }}>
+                                    Upload a .env file to import variables into the list below.
+                                </div>
+                            </div>
+                        )}
+
                         <div style={{ marginBottom: 15 }}>
                             {envVars.length === 0 ? (
                                 <div style={{ textAlign: "center", padding: 30, color: "#999", fontStyle: "italic" }}>
