@@ -112,9 +112,12 @@ export default function GroupView() {
     };
 
     // Redeploy component
-    const redeployComponent = async (projectId, componentType) => {
-        const confirmed = window.confirm(`Redeploy ${componentType}?`);
-        if (!confirmed) return;
+    // skipConfirm: when called from EditEnvModal, skip the confirm dialog
+    const redeployComponent = async (projectId, componentType, skipConfirm = false) => {
+        if (!skipConfirm) {
+            const confirmed = window.confirm(`Redeploy ${componentType}?`);
+            if (!confirmed) return;
+        }
 
         setRedeployingComponent(componentType);
         try {
@@ -130,7 +133,21 @@ export default function GroupView() {
     };
 
     const pollDeploymentStatus = async (deploymentId, componentType) => {
+        let pollCount = 0;
+        const maxPolls = 150; // 5 minutes max (150 * 2 seconds)
+
         const pollInterval = setInterval(async () => {
+            pollCount++;
+
+            // Timeout after max polls
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                setRedeployingComponent(null);
+                showMessage("error", `${componentType} deployment timed out. Check logs for status.`);
+                fetchGroup();
+                return;
+            }
+
             try {
                 const deployment = await apiFetch(`/deployments/status/${deploymentId}`, {
                     token: getToken()
@@ -299,14 +316,22 @@ export default function GroupView() {
             )}
 
             {/* Modals */}
-            {editingEnvProjectId && (
-                <EditEnvModal
-                    projectId={editingEnvProjectId}
-                    projectName={group.frontend?.id === editingEnvProjectId ? "Frontend" : "Backend"}
-                    onClose={() => setEditingEnvProjectId(null)}
-                    onSuccess={fetchGroup}
-                />
-            )}
+            {editingEnvProjectId && (() => {
+                const isFrontend = group.frontend?.id === editingEnvProjectId;
+                const componentType = isFrontend ? "Frontend" : "Backend";
+                return (
+                    <EditEnvModal
+                        projectId={editingEnvProjectId}
+                        projectName={componentType}
+                        onClose={() => setEditingEnvProjectId(null)}
+                        onSuccess={fetchGroup}
+                        onRedeploy={() => {
+                            setEditingEnvProjectId(null); // Close modal first
+                            redeployComponent(editingEnvProjectId, componentType, true); // skipConfirm=true
+                        }}
+                    />
+                );
+            })()}
 
             {managingFilesProjectId && (() => {
                 const isFrontend = group.frontend?.id === managingFilesProjectId;
