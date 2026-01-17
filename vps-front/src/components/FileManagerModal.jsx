@@ -2,27 +2,38 @@ import { useEffect, useState, useRef } from "react";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 
-export default function FileManagerModal({ projectId, projectName, onClose }) {
-    const [currentPath, setCurrentPath] = useState("");
+export default function FileManagerModal({ projectId, projectName, initialPath = "", onClose }) {
+    const [currentPath, setCurrentPath] = useState(initialPath);
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [navigating, setNavigating] = useState(false); // Separate state for folder navigation
     const [error, setError] = useState("");
     const [successMessage, setSuccessMessage] = useState("");
     const [uploading, setUploading] = useState(false);
-    const [expandedFolders, setExpandedFolders] = useState(new Set([""]));
+    const [expandedFolders, setExpandedFolders] = useState(new Set([initialPath]));
     const [showNewFolderInput, setShowNewFolderInput] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
     const [creatingFolder, setCreatingFolder] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
+    const [isVisible, setIsVisible] = useState(false); // For animation
     const fileInputRef = useRef(null);
 
+    // Animate in on mount
     useEffect(() => {
-        fetchFiles(currentPath);
+        requestAnimationFrame(() => setIsVisible(true));
+    }, []);
+
+    useEffect(() => {
+        fetchFiles(currentPath, items.length === 0); // Only show full loading on initial load
     }, [projectId, currentPath]);
 
-    const fetchFiles = async (path) => {
+    const fetchFiles = async (path, isInitialLoad = false) => {
         try {
-            setLoading(true);
+            if (isInitialLoad) {
+                setLoading(true);
+            } else {
+                setNavigating(true); // Use navigating for folder clicks - no layout shift
+            }
             setError("");
             const data = await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(path)}`, {
                 token: getToken()
@@ -33,6 +44,7 @@ export default function FileManagerModal({ projectId, projectName, onClose }) {
             setError(e.message);
         } finally {
             setLoading(false);
+            setNavigating(false);
         }
     };
 
@@ -205,6 +217,11 @@ export default function FileManagerModal({ projectId, projectName, onClose }) {
         );
     };
 
+    const handleClose = () => {
+        setIsVisible(false);
+        setTimeout(onClose, 150); // Wait for animation to complete
+    };
+
     return (
         <div
             style={{
@@ -213,13 +230,14 @@ export default function FileManagerModal({ projectId, projectName, onClose }) {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                background: "rgba(0,0,0,0.5)",
+                background: isVisible ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                zIndex: 2000
+                zIndex: 2000,
+                transition: "background 0.15s ease-out"
             }}
-            onClick={onClose}
+            onClick={handleClose}
         >
             <div
                 style={{
@@ -231,7 +249,10 @@ export default function FileManagerModal({ projectId, projectName, onClose }) {
                     maxHeight: "85vh",
                     display: "flex",
                     flexDirection: "column",
-                    boxShadow: "0 10px 40px rgba(0,0,0,0.3)"
+                    boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+                    transform: isVisible ? "scale(1)" : "scale(0.95)",
+                    opacity: isVisible ? 1 : 0,
+                    transition: "transform 0.15s ease-out, opacity 0.15s ease-out"
                 }}
                 onClick={e => e.stopPropagation()}
             >
@@ -250,7 +271,7 @@ export default function FileManagerModal({ projectId, projectName, onClose }) {
                         </p>
                     </div>
                     <button
-                        onClick={onClose}
+                        onClick={handleClose}
                         style={{
                             background: "none",
                             border: "none",
@@ -409,8 +430,28 @@ export default function FileManagerModal({ projectId, projectName, onClose }) {
                 <div style={{
                     flex: 1,
                     overflow: "auto",
-                    padding: "20px 30px"
+                    padding: "20px 30px",
+                    position: "relative",
+                    minHeight: 200
                 }}>
+                    {/* Navigating overlay - subtle, doesn't replace content */}
+                    {navigating && (
+                        <div style={{
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            background: "rgba(255,255,255,0.7)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            zIndex: 5,
+                            borderRadius: 8
+                        }}>
+                            <span style={{ color: "#666" }}>Loading...</span>
+                        </div>
+                    )}
                     {loading ? (
                         <div style={{ textAlign: "center", padding: 40, color: "#999" }}>
                             Loading files...

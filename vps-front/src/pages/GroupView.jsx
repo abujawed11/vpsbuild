@@ -252,7 +252,11 @@ export default function GroupView() {
                         onAdd={() => { setWizardRole("FRONTEND"); setShowWizard(true); }}
                         onDelete={() => deleteComponent(group.frontend?.id, "Frontend")}
                         onRedeploy={() => redeployComponent(group.frontend?.id, "Frontend")}
-                        onManageFiles={() => setManagingFilesProjectId(group.frontend?.id)}
+                        onManageFiles={() => {
+                            if (group.frontend?.id) {
+                                setManagingFilesProjectId(group.frontend.id);
+                            }
+                        }}
                         onEditEnv={() => setEditingEnvProjectId(group.frontend?.id)}
                         url={projectUrl}
                         urlText={projectUrlText}
@@ -269,7 +273,11 @@ export default function GroupView() {
                         onAdd={() => { setWizardRole("BACKEND"); setShowWizard(true); }}
                         onDelete={() => deleteComponent(group.backend?.id, "Backend")}
                         onRedeploy={() => redeployComponent(group.backend?.id, "Backend")}
-                        onManageFiles={() => setManagingFilesProjectId(group.backend?.id)}
+                        onManageFiles={() => {
+                            if (group.backend?.id) {
+                                setManagingFilesProjectId(group.backend.id);
+                            }
+                        }}
                         onEditEnv={() => setEditingEnvProjectId(group.backend?.id)}
                         onExecuteScript={() => setExecutingScriptProjectId(group.backend?.id)}
                         showExecuteScript
@@ -300,13 +308,21 @@ export default function GroupView() {
                 />
             )}
 
-            {managingFilesProjectId && (
-                <FileManagerModal
-                    projectId={managingFilesProjectId}
-                    projectName={group.frontend?.id === managingFilesProjectId ? "Frontend" : "Backend"}
-                    onClose={() => setManagingFilesProjectId(null)}
-                />
-            )}
+            {managingFilesProjectId && (() => {
+                const isFrontend = group.frontend?.id === managingFilesProjectId;
+                const rootDir = isFrontend ? group.frontend?.rootDir : group.backend?.rootDir;
+                // Normalize: "/" or empty means repo root (empty string for file manager)
+                const initialPath = (!rootDir || rootDir === "/") ? "" : rootDir.replace(/^\//, "");
+                return (
+                    <FileManagerModal
+                        key={managingFilesProjectId}
+                        projectId={managingFilesProjectId}
+                        projectName={isFrontend ? "Frontend" : "Backend"}
+                        initialPath={initialPath}
+                        onClose={() => setManagingFilesProjectId(null)}
+                    />
+                );
+            })()}
 
             {executingScriptProjectId && (
                 <ExecuteScriptModal
