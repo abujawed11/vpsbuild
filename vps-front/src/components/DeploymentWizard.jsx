@@ -18,7 +18,8 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
     const [sourceType, setSourceType] = useState(""); // "github" or "zip"
 
     // Step 2: Create Site
-    const [siteName, setSiteName] = useState("");
+    // Pre-fill name with role if provided (e.g., "Frontend" or "Backend")
+    const [siteName, setSiteName] = useState(role ? (role === "FRONTEND" ? "Frontend" : "Backend") : "");
     // When role is provided, we don't need a custom slug - it's derived from groupSlug + role
     const [siteSlug, setSiteSlug] = useState("");
     // When role is provided, site type is pre-determined (FRONTEND -> static, BACKEND -> server)
@@ -460,13 +461,25 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
         setEditingEnvField(null);
     };
 
+    // For role-based deployments, we skip step 2, so adjust step display
+    // Mapping: actual step -> display step (for role-based)
+    // 1->1, 3->2, 4->3, 5->4, 6->5, 7->6
+    const getDisplayStep = (actualStep) => {
+        if (!role) return actualStep;
+        if (actualStep === 1) return 1;
+        if (actualStep >= 3) return actualStep - 1;
+        return actualStep;
+    };
+    const totalSteps = role ? 6 : 7;
+    const displayStep = getDisplayStep(step);
+
     return (
         <div style={{ background: "white", padding: 30, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.08)" }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 30 }}>
-                {[1, 2, 3, 4, 5, 6, 7].map(s => (
+                {Array.from({ length: totalSteps }, (_, i) => i + 1).map(s => (
                     <div key={s} style={{
                         height: 6, flex: 1,
-                        background: step >= s ? "#2196F3" : "#e0e0e0",
+                        background: displayStep >= s ? "#2196F3" : "#e0e0e0",
                         borderRadius: 3,
                         transition: "background 0.3s ease"
                     }} />
@@ -480,7 +493,16 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
                     <div style={{ display: "flex", gap: 15, marginBottom: 25 }}>
                         <button
-                            onClick={() => { setSourceType("github"); setStep(2); }}
+                            onClick={() => {
+                                setSourceType("github");
+                                // Skip step 2 for role-based deployments (name is auto-generated)
+                                if (role) {
+                                    fetchRepos();
+                                    setStep(3);
+                                } else {
+                                    setStep(2);
+                                }
+                            }}
                             style={{
                                 flex: 1, padding: 25, borderRadius: 12, border: "2px solid #ddd",
                                 background: "white", cursor: "pointer", textAlign: "center", transition: "all 0.2s"
@@ -494,7 +516,11 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                         </button>
 
                         <button
-                            onClick={() => { setSourceType("zip"); setStep(2); }}
+                            onClick={() => {
+                                setSourceType("zip");
+                                // Skip step 2 for role-based deployments (name is auto-generated)
+                                setStep(role ? 3 : 2);
+                            }}
                             style={{
                                 flex: 1, padding: 25, borderRadius: 12, border: "2px solid #ddd",
                                 background: "white", cursor: "pointer", textAlign: "center", transition: "all 0.2s"
@@ -559,14 +585,22 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     )}
 
                     <div style={{ marginBottom: 20 }}>
-                        <label style={labelStyle}>{role ? `${role === "FRONTEND" ? "Frontend" : "Backend"} Name` : "Site Name"}</label>
+                        <label style={labelStyle}>
+                            {role ? `${role === "FRONTEND" ? "Frontend" : "Backend"} Name` : "Site Name"}
+                            {role && <span style={{ fontWeight: 400, color: "#888", marginLeft: 5 }}>(for identification)</span>}
+                        </label>
                         <input
                             value={siteName}
                             onChange={e => setSiteName(e.target.value)}
-                            placeholder={role ? `My ${role === "FRONTEND" ? "Frontend" : "Backend"}` : "My Awesome Site"}
+                            placeholder={role ? `${role === "FRONTEND" ? "Frontend" : "Backend"}` : "My Awesome Site"}
                             style={inputStyle}
                             autoFocus
                         />
+                        {role && (
+                            <small style={{ color: "#666", fontSize: "0.85em", display: "block", marginTop: 5 }}>
+                                This name is only used internally for identification. It won't affect your URL.
+                            </small>
+                        )}
                     </div>
 
                     {/* Only show URL/slug input when role is NOT provided (legacy flow) */}
@@ -588,12 +622,18 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     {/* Show project URL info when role is provided */}
                     {role && groupSlug && (
                         <div style={{ marginBottom: 25, padding: 12, background: "#f5f5f5", borderRadius: 8, border: "1px solid #ddd" }}>
-                            <label style={{ ...labelStyle, marginBottom: 8 }}>Deployment URL</label>
-                            <div style={{ fontFamily: "monospace", fontSize: "0.9em" }}>
-                                <span style={{ color: "#2196F3" }}>http://{groupSlug}-{role.toLowerCase()}.{baseDomain}{basePort}</span>
+                            <label style={{ ...labelStyle, marginBottom: 8 }}>Accessible At</label>
+                            <div style={{ fontFamily: "monospace", fontSize: "0.95em" }}>
+                                <a href={`http://${groupSlug}.${baseDomain}${basePort}${role === "BACKEND" ? "/api" : ""}`}
+                                   target="_blank" rel="noreferrer" style={{ color: "#2196F3", textDecoration: "none" }}>
+                                    {groupSlug}.{baseDomain}{basePort}{role === "BACKEND" ? "/api/*" : "/"}
+                                </a>
                             </div>
                             <div style={{ marginTop: 8, fontSize: "0.8em", color: "#666" }}>
-                                This will be accessible via the project URL: <code>{groupSlug}.{baseDomain}{basePort}{role === "BACKEND" ? "/api/*" : "/"}</code>
+                                {role === "FRONTEND"
+                                    ? "Your frontend will be served at the root of your project URL."
+                                    : "Your backend API will be accessible via the /api path prefix."
+                                }
                             </div>
                         </div>
                     )}
@@ -618,7 +658,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
             {step === 3 && sourceType === "github" && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 3: Choose Repository</h3>
+                    <h3 style={stepTitle}>Step {role ? 2 : 3}: Choose Repository</h3>
                     <p style={stepDesc}>Select a GitHub repository to deploy.</p>
                     {loading ? <p>Loading repos...</p> : (
                         <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 20 }}>
@@ -643,7 +683,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                         </div>
                     )}
                     <div style={{ display: "flex", gap: 10 }}>
-                        <button onClick={() => setStep(2)} style={secondaryBtn}>← Back</button>
+                        <button onClick={() => setStep(role ? 1 : 2)} style={secondaryBtn}>← Back</button>
                         <button onClick={createProject} disabled={!selectedBranch || loading} style={primaryBtn}>
                             {loading ? "Initializing..." : "Next: Select Root →"}
                         </button>
@@ -653,7 +693,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
             {step === 3 && sourceType === "zip" && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 3: Upload ZIP File</h3>
+                    <h3 style={stepTitle}>Step {role ? 2 : 3}: Upload ZIP File</h3>
                     <p style={stepDesc}>Upload your project as a ZIP file (max 100MB)</p>
 
                     <div
@@ -727,7 +767,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     )}
 
                     <div style={{ display: "flex", gap: 10 }}>
-                        <button onClick={() => setStep(2)} style={secondaryBtn}>← Back</button>
+                        <button onClick={() => setStep(role ? 1 : 2)} style={secondaryBtn}>← Back</button>
                         <button onClick={createProjectWithZip} disabled={!uploadedFile || loading} style={primaryBtn}>
                             {loading ? "Uploading..." : "Next: Select Root →"}
                         </button>
@@ -737,8 +777,8 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
             {step === 4 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 4: Select Root Folder</h3>
-                    <p style={stepDesc}>Where does your frontend code live? (Usually root or a subfolder like /frontend)</p>
+                    <h3 style={stepTitle}>Step {role ? 3 : 4}: Select Root Folder</h3>
+                    <p style={stepDesc}>Where does your {role === "BACKEND" ? "backend" : "frontend"} code live? (Usually root or a subfolder)</p>
                     <div style={{ border: "1px solid #eee", padding: 10, borderRadius: 8, maxHeight: 300, overflowY: "auto", marginBottom: 20, background: "#fafafa" }}>
                         {folderTree && <SimpleFolderTree tree={folderTree} onSelect={setSelectedRoot} selected={selectedRoot} />}
                     </div>
@@ -756,7 +796,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
             {step === 5 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 5: {siteType === "server" ? "Server Settings" : "Build Settings"}</h3>
+                    <h3 style={stepTitle}>Step {role ? 4 : 5}: {siteType === "server" ? "Server Settings" : "Build Settings"}</h3>
                     <p style={stepDesc}>{siteType === "server" ? "Configure your server runtime settings." : "We auto-detected these settings. Tweaks allowed."}</p>
 
                     <div style={{ display: "grid", gap: 20, marginBottom: 25 }}>
@@ -839,7 +879,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
             {step === 6 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step 6: Environment Variables</h3>
+                    <h3 style={stepTitle}>Step {role ? 5 : 6}: Environment Variables</h3>
                     <p style={stepDesc}>
                         {siteType === "server"
                             ? "Add runtime environment variables. (Note: PORT, NODE_ENV, HOST are managed automatically)"
@@ -1065,7 +1105,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
             {step === 7 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Building & Deploying...</h3>
+                    <h3 style={stepTitle}>Step {role ? 6 : 7}: Building & Deploying...</h3>
                     <div id="log-container" style={{ 
                         background: "#1e1e1e", color: "#a9b7c6", padding: 20, borderRadius: 8, 
                         height: 350, overflowY: "auto", fontFamily: "Consolas, Monaco, monospace", fontSize: "0.85em",
@@ -1079,11 +1119,12 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     </div>
                     
                     {deployment?.status === "DEPLOYED" && (() => {
-                        // For role-based deployment, use projectData.slug (which is groupSlug-role)
-                        // For legacy, use siteSlug
-                        const slug = projectData?.slug || siteSlug;
-                        const siteUrl = `http://${slug}.${baseDomain}${basePort}`;
-                        const siteLabel = `${slug}.${baseDomain}${basePort}`;
+                        // For role-based deployment, use groupSlug (the project URL)
+                        // For legacy, use siteSlug (the individual site's subdomain)
+                        const urlSlug = role ? groupSlug : (projectData?.slug || siteSlug);
+                        const urlPath = role === "BACKEND" ? "/api" : "";
+                        const siteUrl = `http://${urlSlug}.${baseDomain}${basePort}${urlPath}`;
+                        const siteLabel = `${urlSlug}.${baseDomain}${basePort}${urlPath || "/"}`;
 
                         return (
                             <div style={{ marginTop: 25, textAlign: "center", padding: 20, background: "#e8f5e9", borderRadius: 8, border: "1px solid #c8e6c9" }}>
