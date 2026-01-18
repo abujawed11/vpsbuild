@@ -19,6 +19,8 @@ const router = express.Router();
 
 // Mock/Local path for testing if not on server
 const BASE_STATIC_PATH = process.env.STATIC_SITES_PATH || "/srv/static-sites";
+// Path on the host machine (for bind mounts in sibling containers)
+const HOST_STATIC_PATH = process.env.HOST_STATIC_SITES_PATH || BASE_STATIC_PATH;
 
 function normalizeWorkspaceRelPath(rel) {
     if (rel === undefined || rel === null) return "";
@@ -470,20 +472,42 @@ async function runServerDeploy(project, deploymentId) {
         // Handle persistent storage volume if staticFolder is configured
         let volumeMount = "";
         if (project.staticFolder) {
-            const volumeName = `${project.slug}-uploads`;
+            let groupSlug = null;
 
-            // Create volume if it doesn't exist
-            await updateLogs(`[INFO] Creating persistent volume: ${volumeName}`);
-            await execPromise(`docker volume create ${volumeName}`).catch(() => {});
+            if (project.groupId) {
+                 const group = await prisma.projectGroup.findUnique({
+                    where: { id: project.groupId }
+                });
+                if (group) groupSlug = group.slug;
+            }
 
-            // Mount volume to /app/{staticFolder}
-            volumeMount = `-v ${volumeName}:/app/${project.staticFolder}`;
-            await updateLogs(`[INFO] Mounting volume at /app/${project.staticFolder}`);
+            // Determine host path: /srv/static-sites/{slug}/{staticFolder}
+            // Use group slug if available (for File Manager compatibility), else project slug
+            const storageSlug = groupSlug || project.slug;
+            
+            // Path used by vps-back to create directory (internal container path)
+            const internalStoragePath = path.join(BASE_STATIC_PATH, storageSlug, project.staticFolder);
+            // Path used by sibling container to mount directory (host path)
+            const hostStoragePath = path.join(HOST_STATIC_PATH, storageSlug, project.staticFolder);
 
-            // Update project with volume name for reference
+            // Ensure directory exists (using internal path)
+            await updateLogs(`[INFO] Preparing persistent storage: ${internalStoragePath}`);
+            try {
+                if (!fs.existsSync(internalStoragePath)) {
+                    fs.mkdirSync(internalStoragePath, { recursive: true });
+                }
+            } catch (fsErr) {
+                 await updateLogs(`[WARN] Failed to create storage directory: ${fsErr.message}`);
+            }
+
+            // Mount volume using bind mount (using host path)
+            volumeMount = `-v "${hostStoragePath}":/app/${project.staticFolder}`;
+            await updateLogs(`[INFO] Mounting host path to /app/${project.staticFolder}`);
+
+            // Update project with volume info for reference
             await prisma.project.update({
                 where: { id: project.id },
-                data: { uploadsVolume: volumeName }
+                data: { uploadsVolume: hostStoragePath }
             });
         }
 

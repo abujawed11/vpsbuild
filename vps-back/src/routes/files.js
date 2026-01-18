@@ -15,18 +15,29 @@ const storage = multer.diskStorage({
             const { groupId } = req.params;
             const folder = req.query.folder || 'uploads';
 
-            // Validate folder
-            if (!['uploads', 'media'].includes(folder)) {
-                return cb(new Error('Invalid folder. Must be "uploads" or "media"'));
-            }
-
             // Get project group to find slug
             const group = await prisma.projectGroup.findUnique({
-                where: { id: groupId }
+                where: { id: groupId },
+                include: { projects: true }
             });
 
             if (!group) {
                 return cb(new Error('Project not found'));
+            }
+
+            // Get allowed folders from projects
+            const allowedFolders = ['uploads', 'media'];
+            group.projects.forEach(p => {
+                if (p.staticFolder) allowedFolders.push(p.staticFolder);
+            });
+
+            // Validate folder
+            const isAllowed = allowedFolders.some(root => 
+                (folder === root) || (folder.startsWith(root + '/') && !folder.includes('..'))
+            );
+
+            if (!isAllowed) {
+                return cb(new Error(`Invalid folder. Must start with one of: ${allowedFolders.join(', ')}`));
             }
 
             const staticSitesPath = process.env.STATIC_SITES_PATH || '/srv/static-sites';
@@ -82,7 +93,8 @@ const upload = multer({
  */
 async function verifyGroupOwnership(groupId, userId) {
     const group = await prisma.projectGroup.findUnique({
-        where: { id: groupId }
+        where: { id: groupId },
+        include: { projects: true }
     });
 
     if (!group || group.userId !== userId) {
@@ -148,12 +160,22 @@ router.get("/:groupId", authRequired, async (req, res) => {
             return res.status(404).json({ error: "Project not found" });
         }
 
-        // Validate folder
-        if (!['uploads', 'media'].includes(folder)) {
-            return res.status(400).json({ error: 'Invalid folder. Must be "uploads" or "media"' });
+        // Get allowed folders from projects
+        const allowedFolders = ['uploads', 'media'];
+        if (group.projects) {
+             group.projects.forEach(p => {
+                if (p.staticFolder) allowedFolders.push(p.staticFolder);
+            });
         }
 
-        const staticSitesPath = process.env.STATIC_SITES_PATH || '/srv/static-sites';
+        // Validate folder
+        const isAllowed = allowedFolders.some(root => 
+            (folder === root) || (folder.startsWith(root + '/') && !folder.includes('..'))
+        );
+
+        if (!isAllowed) {
+            return res.status(400).json({ error: `Invalid folder. Must start with one of: ${allowedFolders.join(', ')}` });
+        }
         const folderPath = path.join(staticSitesPath, group.slug, folder);
 
         // Check if folder exists
@@ -221,9 +243,21 @@ router.delete("/:groupId/:filename", authRequired, async (req, res) => {
             return res.status(404).json({ error: "Project not found" });
         }
 
+        // Get allowed folders from projects
+        const allowedFolders = ['uploads', 'media'];
+        if (group.projects) {
+             group.projects.forEach(p => {
+                if (p.staticFolder) allowedFolders.push(p.staticFolder);
+            });
+        }
+
         // Validate folder
-        if (!['uploads', 'media'].includes(folder)) {
-            return res.status(400).json({ error: 'Invalid folder. Must be "uploads" or "media"' });
+        const isAllowed = allowedFolders.some(root => 
+            (folder === root) || (folder.startsWith(root + '/') && !folder.includes('..'))
+        );
+
+        if (!isAllowed) {
+            return res.status(400).json({ error: `Invalid folder. Must start with one of: ${allowedFolders.join(', ')}` });
         }
 
         // Sanitize filename to prevent directory traversal
