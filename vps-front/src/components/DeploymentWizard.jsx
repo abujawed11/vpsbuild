@@ -397,6 +397,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
     const [showFilePicker, setShowFilePicker] = useState(false);
     const [useCustomCommand, setUseCustomCommand] = useState(false);
 
+    // Backend persistent storage
+    const [staticFolder, setStaticFolder] = useState("uploads");
+
     // Frontend framework selection
     const [selectedFrontendFramework, setSelectedFrontendFramework] = useState("");
 
@@ -619,7 +622,9 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     packageManager: buildSettings.packageManager,
                     startCommand: buildSettings.startCommand,
                     // For servers, installCommand maps to buildCommand in the API
-                    buildCommand: buildSettings.installCommand || buildSettings.buildCommand
+                    buildCommand: buildSettings.installCommand || buildSettings.buildCommand,
+                    // Persistent storage folder
+                    staticFolder: staticFolder || null
                 }
                 : {
                     packageManager: buildSettings.packageManager,
@@ -1549,6 +1554,48 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                                     </div>
                                 </div>
                             )}
+
+                            {/* Persistent Storage Configuration */}
+                            <div style={{
+                                background: "#e8f4fd",
+                                border: "1px solid #b8daff",
+                                borderRadius: 8,
+                                padding: 16
+                            }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                                    <span style={{ fontSize: "1.2em" }}>💾</span>
+                                    <span style={{ fontWeight: 600, color: "#004085" }}>Persistent Storage</span>
+                                </div>
+                                <p style={{ fontSize: "0.85em", color: "#004085", marginBottom: 12 }}>
+                                    Files in this folder will persist across redeployments. Leave empty if not needed.
+                                </p>
+                                <div>
+                                    <label style={{ fontSize: "0.8em", color: "#004085", display: "block", marginBottom: 4 }}>
+                                        Static Files Folder
+                                    </label>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                        <span style={{ color: "#6c757d", fontFamily: "monospace" }}>/app/</span>
+                                        <input
+                                            value={staticFolder}
+                                            onChange={e => setStaticFolder(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
+                                            placeholder="uploads"
+                                            style={{
+                                                ...inputStyle,
+                                                flex: 1,
+                                                fontFamily: "monospace",
+                                                fontSize: "0.9em"
+                                            }}
+                                        />
+                                    </div>
+                                    <small style={{ color: "#6c757d", fontSize: "0.8em", marginTop: 6, display: "block" }}>
+                                        {staticFolder ? (
+                                            <>Your app can save files to <code style={{ background: "#f1f3f5", padding: "2px 4px", borderRadius: 3 }}>/app/{staticFolder}/</code> and they'll be served at <code style={{ background: "#f1f3f5", padding: "2px 4px", borderRadius: 3 }}>/{staticFolder}/*</code></>
+                                        ) : (
+                                            "No persistent storage configured. Files will be lost on redeploy."
+                                        )}
+                                    </small>
+                                </div>
+                            </div>
                         </div>
                     ) : (
                         /* ========== FRONTEND STATIC SETTINGS ========== */

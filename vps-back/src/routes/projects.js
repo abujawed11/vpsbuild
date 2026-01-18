@@ -374,7 +374,7 @@ router.post("/:id/roots", authRequired, async (req, res) => {
 // PATCH /api/projects/:id
 router.patch("/:id", authRequired, async (req, res) => {
     const { id } = req.params;
-    const { name, slug, rootDir, buildCommand, outputDir, packageManager, startCommand } = req.body;
+    const { name, slug, rootDir, buildCommand, outputDir, packageManager, startCommand, staticFolder } = req.body;
 
     try {
         const project = await prisma.project.findUnique({ where: { id } });
@@ -403,6 +403,7 @@ router.patch("/:id", authRequired, async (req, res) => {
                 outputDir,
                 packageManager,
                 startCommand,
+                staticFolder,
                 port: detectedPort
             }
         });

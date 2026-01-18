@@ -33,8 +33,34 @@ function generateNginxServerConfig(projectGroup) {
     // Build location blocks based on what's deployed
     let locationBlocks = '';
 
-    // Always include uploads and media (VPSBuild-managed static files)
-    locationBlocks += `
+    // Backend persistent storage (user-configured static folder)
+    // Proxy to backend container which serves files from its mounted volume
+    if (backend && backend.staticFolder) {
+        const backendPort = backend.port || 3000;
+        const backendContainer = `${slug}-backend`;
+        const staticFolder = backend.staticFolder;
+
+        locationBlocks += `
+    # User uploads/media - proxied to backend container's persistent volume
+    location /${staticFolder}/ {
+        set $backend "${backendContainer}";
+        proxy_pass http://$backend:${backendPort}/${staticFolder}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        # Cache static files
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options "nosniff";
+    }
+`;
+    } else {
+        // Fallback: serve from static sites path (legacy behavior)
+        locationBlocks += `
     # VPSBuild-managed uploads - served directly by Nginx
     location /uploads/ {
         alias ${staticSitesPath}/${slug}/uploads/;
@@ -51,6 +77,7 @@ function generateNginxServerConfig(projectGroup) {
         add_header X-Content-Type-Options "nosniff";
     }
 `;
+    }
 
     // Backend API routes (if backend is deployed)
     if (backend) {

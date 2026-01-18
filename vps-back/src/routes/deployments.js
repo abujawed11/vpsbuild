@@ -466,7 +466,28 @@ async function runServerDeploy(project, deploymentId) {
         // Add host.docker.internal to allow containers to access host services (like MySQL on host)
         await updateLogs("=== STARTING CONTAINER ===");
         const runNetwork = process.env.GATEWAY_NETWORK || "vpsbuilds_default";
-        const runCmd = `docker run -d --name ${project.slug} --network ${runNetwork} --restart unless-stopped --add-host=host.docker.internal:host-gateway --memory="512m" --cpus="1.0" ${nodeEnv} ${portEnv} ${envFlags} ${imageTag}`;
+
+        // Handle persistent storage volume if staticFolder is configured
+        let volumeMount = "";
+        if (project.staticFolder) {
+            const volumeName = `${project.slug}-uploads`;
+
+            // Create volume if it doesn't exist
+            await updateLogs(`[INFO] Creating persistent volume: ${volumeName}`);
+            await execPromise(`docker volume create ${volumeName}`).catch(() => {});
+
+            // Mount volume to /app/{staticFolder}
+            volumeMount = `-v ${volumeName}:/app/${project.staticFolder}`;
+            await updateLogs(`[INFO] Mounting volume at /app/${project.staticFolder}`);
+
+            // Update project with volume name for reference
+            await prisma.project.update({
+                where: { id: project.id },
+                data: { uploadsVolume: volumeName }
+            });
+        }
+
+        const runCmd = `docker run -d --name ${project.slug} --network ${runNetwork} --restart unless-stopped --add-host=host.docker.internal:host-gateway --memory="512m" --cpus="1.0" ${volumeMount} ${nodeEnv} ${portEnv} ${envFlags} ${imageTag}`;
 
         try {
             await execPromise(runCmd, { timeout: 30000 });
@@ -601,7 +622,8 @@ async function runServerDeploy(project, deploymentId) {
                     apiPathPrefix: group.apiPathPrefix || "/api",
                     frontend: hasDeployedFrontend ? {} : null,
                     backend: backendProject ? {
-                        port: backendProject.id === project.id ? effectivePort : (backendProject.port || 3000)
+                        port: backendProject.id === project.id ? effectivePort : (backendProject.port || 3000),
+                        staticFolder: backendProject.staticFolder || null
                     } : null
                 };
 
@@ -941,7 +963,10 @@ async function runBuild(project, deploymentId) {
                     slug: group.slug,
                     apiPathPrefix: group.apiPathPrefix || "/api",
                     frontend: {},
-                    backend: hasDeployedBackend ? { port: backendProject.port || 3000 } : null
+                    backend: hasDeployedBackend ? {
+                        port: backendProject.port || 3000,
+                        staticFolder: backendProject.staticFolder || null
+                    } : null
                 };
 
                 const configPath = await writeNginxConfig(nginxTarget);

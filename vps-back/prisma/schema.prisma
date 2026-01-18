@@ -95,7 +95,11 @@ model Project {
 
   // Static Deployment Props
   slug             String?  @unique
-  rootDir          String   @default("/") 
+  rootDir          String   @default("/")
+
+  // Backend persistent storage
+  staticFolder     String?  // Folder name for static files (e.g., "uploads", "media", "files")
+  uploadsVolume    String?  // Docker volume name for persistent uploads 
 
   deployments      Deployment[]
   envVars          EnvVar[]
