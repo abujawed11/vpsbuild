@@ -42,9 +42,11 @@ function generateNginxServerConfig(projectGroup) {
 
         locationBlocks += `
     # User uploads/media - proxied to backend container's persistent volume
+    # Request: /${staticFolder}/image.png → Backend: /${staticFolder}/image.png (path unchanged)
+    # Backend must serve static files at /${staticFolder}/ route
     location /${staticFolder}/ {
         set $backend "${backendContainer}";
-        proxy_pass http://$backend:${backendPort}/${staticFolder}/;
+        proxy_pass http://$backend:${backendPort};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

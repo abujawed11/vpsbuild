@@ -399,6 +399,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
     // Backend persistent storage
     const [staticFolder, setStaticFolder] = useState("uploads");
+    const [showStorageHelp, setShowStorageHelp] = useState(false);
 
     // Frontend framework selection
     const [selectedFrontendFramework, setSelectedFrontendFramework] = useState("");
@@ -1562,9 +1563,28 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                                 borderRadius: 8,
                                 padding: 16
                             }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                                    <span style={{ fontSize: "1.2em" }}>💾</span>
-                                    <span style={{ fontWeight: 600, color: "#004085" }}>Persistent Storage</span>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                        <span style={{ fontSize: "1.2em" }}>💾</span>
+                                        <span style={{ fontWeight: 600, color: "#004085" }}>Persistent Storage</span>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowStorageHelp(true)}
+                                        style={{
+                                            background: "#004085",
+                                            color: "white",
+                                            border: "none",
+                                            borderRadius: 6,
+                                            padding: "6px 12px",
+                                            fontSize: "0.8em",
+                                            cursor: "pointer",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 4
+                                        }}
+                                    >
+                                        <span>?</span> Setup Guide
+                                    </button>
                                 </div>
                                 <p style={{ fontSize: "0.85em", color: "#004085", marginBottom: 12 }}>
                                     Files in this folder will persist across redeployments. Leave empty if not needed.
@@ -1596,6 +1616,271 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                                     </small>
                                 </div>
                             </div>
+
+                            {/* Storage Help Modal */}
+                            {showStorageHelp && (
+                                <div style={{
+                                    position: "fixed",
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    background: "rgba(0,0,0,0.5)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    zIndex: 1000,
+                                    padding: 20
+                                }} onClick={() => setShowStorageHelp(false)}>
+                                    <div
+                                        style={{
+                                            background: "white",
+                                            borderRadius: 12,
+                                            maxWidth: 700,
+                                            maxHeight: "90vh",
+                                            overflow: "auto",
+                                            boxShadow: "0 20px 60px rgba(0,0,0,0.3)"
+                                        }}
+                                        onClick={e => e.stopPropagation()}
+                                    >
+                                        {/* Modal Header */}
+                                        <div style={{
+                                            padding: "20px 24px",
+                                            borderBottom: "1px solid #e9ecef",
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            alignItems: "center",
+                                            position: "sticky",
+                                            top: 0,
+                                            background: "white",
+                                            borderRadius: "12px 12px 0 0"
+                                        }}>
+                                            <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 10 }}>
+                                                <span>📚</span> Persistent Storage Setup Guide
+                                            </h3>
+                                            <button
+                                                onClick={() => setShowStorageHelp(false)}
+                                                style={{
+                                                    background: "none",
+                                                    border: "none",
+                                                    fontSize: "1.5em",
+                                                    cursor: "pointer",
+                                                    color: "#666",
+                                                    padding: 0,
+                                                    lineHeight: 1
+                                                }}
+                                            >×</button>
+                                        </div>
+
+                                        {/* Modal Body */}
+                                        <div style={{ padding: 24 }}>
+                                            {/* How it works */}
+                                            <div style={{ marginBottom: 24 }}>
+                                                <h4 style={{ margin: "0 0 12px 0", color: "#1a73e8" }}>📋 How it works</h4>
+                                                <div style={{
+                                                    background: "#f8f9fa",
+                                                    borderRadius: 8,
+                                                    padding: 16,
+                                                    fontSize: "0.9em"
+                                                }}>
+                                                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                                        <tbody>
+                                                            <tr>
+                                                                <td style={{ padding: "8px 12px", borderBottom: "1px solid #dee2e6", fontWeight: 500 }}>Folder name</td>
+                                                                <td style={{ padding: "8px 12px", borderBottom: "1px solid #dee2e6", fontFamily: "monospace" }}>{staticFolder || "uploads"}</td>
+                                                            </tr>
+                                                            <tr>
+                                                                <td style={{ padding: "8px 12px", borderBottom: "1px solid #dee2e6", fontWeight: 500 }}>Save files to</td>
+                                                                <td style={{ padding: "8px 12px", borderBottom: "1px solid #dee2e6", fontFamily: "monospace" }}>/app/{staticFolder || "uploads"}/</td>
+                                                            </tr>
+                                                            <tr>
+                                                                <td style={{ padding: "8px 12px", borderBottom: "1px solid #dee2e6", fontWeight: 500 }}>Public URL</td>
+                                                                <td style={{ padding: "8px 12px", borderBottom: "1px solid #dee2e6", fontFamily: "monospace" }}>/{staticFolder || "uploads"}/filename.jpg</td>
+                                                            </tr>
+                                                            <tr>
+                                                                <td style={{ padding: "8px 12px", fontWeight: 500 }}>Backend receives</td>
+                                                                <td style={{ padding: "8px 12px", fontFamily: "monospace" }}>GET /{staticFolder || "uploads"}/filename.jpg</td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+
+                                            {/* Framework Examples */}
+                                            <div style={{ marginBottom: 24 }}>
+                                                <h4 style={{ margin: "0 0 12px 0", color: "#1a73e8" }}>⚙️ Backend Setup (serve static files)</h4>
+
+                                                {/* Express.js */}
+                                                <div style={{ marginBottom: 16 }}>
+                                                    <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                                        <span style={{ color: "#68a063" }}>●</span> Express.js (Node.js)
+                                                    </div>
+                                                    <pre style={{
+                                                        background: "#1e1e1e",
+                                                        color: "#d4d4d4",
+                                                        padding: 12,
+                                                        borderRadius: 6,
+                                                        overflow: "auto",
+                                                        fontSize: "0.85em",
+                                                        margin: 0
+                                                    }}>
+{`const express = require('express');
+const app = express();
+
+// Serve static files
+app.use('/${staticFolder || "uploads"}', express.static('/app/${staticFolder || "uploads"}'));`}
+                                                    </pre>
+                                                </div>
+
+                                                {/* FastAPI */}
+                                                <div style={{ marginBottom: 16 }}>
+                                                    <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                                        <span style={{ color: "#009688" }}>●</span> FastAPI (Python)
+                                                    </div>
+                                                    <pre style={{
+                                                        background: "#1e1e1e",
+                                                        color: "#d4d4d4",
+                                                        padding: 12,
+                                                        borderRadius: 6,
+                                                        overflow: "auto",
+                                                        fontSize: "0.85em",
+                                                        margin: 0
+                                                    }}>
+{`from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI()
+
+# Serve static files
+app.mount('/${staticFolder || "uploads"}', StaticFiles(directory='/app/${staticFolder || "uploads"}'), name='${staticFolder || "uploads"}')`}
+                                                    </pre>
+                                                </div>
+
+                                                {/* Flask */}
+                                                <div style={{ marginBottom: 16 }}>
+                                                    <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                                        <span style={{ color: "#000" }}>●</span> Flask (Python)
+                                                    </div>
+                                                    <pre style={{
+                                                        background: "#1e1e1e",
+                                                        color: "#d4d4d4",
+                                                        padding: 12,
+                                                        borderRadius: 6,
+                                                        overflow: "auto",
+                                                        fontSize: "0.85em",
+                                                        margin: 0
+                                                    }}>
+{`from flask import Flask, send_from_directory
+
+app = Flask(__name__)
+
+@app.route('/${staticFolder || "uploads"}/<path:filename>')
+def serve_${staticFolder || "uploads"}(filename):
+    return send_from_directory('/app/${staticFolder || "uploads"}', filename)`}
+                                                    </pre>
+                                                </div>
+
+                                                {/* Go */}
+                                                <div>
+                                                    <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                                        <span style={{ color: "#00ADD8" }}>●</span> Gin / Echo / Fiber (Go)
+                                                    </div>
+                                                    <pre style={{
+                                                        background: "#1e1e1e",
+                                                        color: "#d4d4d4",
+                                                        padding: 12,
+                                                        borderRadius: 6,
+                                                        overflow: "auto",
+                                                        fontSize: "0.85em",
+                                                        margin: 0
+                                                    }}>
+{`// Gin
+router.Static("/${staticFolder || "uploads"}", "/app/${staticFolder || "uploads"}")
+
+// Echo
+e.Static("/${staticFolder || "uploads"}", "/app/${staticFolder || "uploads"}")
+
+// Fiber
+app.Static("/${staticFolder || "uploads"}", "/app/${staticFolder || "uploads"}")`}
+                                                    </pre>
+                                                </div>
+                                            </div>
+
+                                            {/* Saving files */}
+                                            <div style={{ marginBottom: 24 }}>
+                                                <h4 style={{ margin: "0 0 12px 0", color: "#1a73e8" }}>💾 Saving uploaded files</h4>
+                                                <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                                    <span style={{ color: "#68a063" }}>●</span> Express.js + Multer
+                                                </div>
+                                                <pre style={{
+                                                    background: "#1e1e1e",
+                                                    color: "#d4d4d4",
+                                                    padding: 12,
+                                                    borderRadius: 6,
+                                                    overflow: "auto",
+                                                    fontSize: "0.85em",
+                                                    margin: 0
+                                                }}>
+{`const multer = require('multer');
+
+const storage = multer.diskStorage({
+  destination: '/app/${staticFolder || "uploads"}',  // Save files here
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
+
+const upload = multer({ storage });
+
+app.post('/upload', upload.single('file'), (req, res) => {
+  res.json({ url: '/${staticFolder || "uploads"}/' + req.file.filename });
+});`}
+                                                </pre>
+                                            </div>
+
+                                            {/* Important Notes */}
+                                            <div style={{
+                                                background: "#fff3cd",
+                                                border: "1px solid #ffc107",
+                                                borderRadius: 8,
+                                                padding: 16
+                                            }}>
+                                                <h4 style={{ margin: "0 0 10px 0", color: "#856404" }}>⚠️ Important Notes</h4>
+                                                <ul style={{ margin: 0, paddingLeft: 20, color: "#856404", fontSize: "0.9em" }}>
+                                                    <li style={{ marginBottom: 6 }}>Files in <code>/app/{staticFolder || "uploads"}/</code> <strong>persist across redeployments</strong></li>
+                                                    <li style={{ marginBottom: 6 }}>Your backend <strong>must</strong> serve the route <code>/{staticFolder || "uploads"}/*</code></li>
+                                                    <li style={{ marginBottom: 6 }}>If you change the folder name, update your backend code accordingly</li>
+                                                    <li>Leave folder name empty if your backend handles all file storage (e.g., cloud storage)</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+
+                                        {/* Modal Footer */}
+                                        <div style={{
+                                            padding: "16px 24px",
+                                            borderTop: "1px solid #e9ecef",
+                                            display: "flex",
+                                            justifyContent: "flex-end"
+                                        }}>
+                                            <button
+                                                onClick={() => setShowStorageHelp(false)}
+                                                style={{
+                                                    background: "#1a73e8",
+                                                    color: "white",
+                                                    border: "none",
+                                                    borderRadius: 6,
+                                                    padding: "10px 24px",
+                                                    fontSize: "0.95em",
+                                                    cursor: "pointer",
+                                                    fontWeight: 500
+                                                }}
+                                            >
+                                                Got it!
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         /* ========== FRONTEND STATIC SETTINGS ========== */
