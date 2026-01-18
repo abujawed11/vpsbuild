@@ -697,6 +697,10 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                 fw.fileFilter.forEach(ext => allExtensions.add(ext));
             });
 
+            // Determine the root path to start from
+            const rootPath = selectedRoot === "/" || selectedRoot === "." ? "" : selectedRoot;
+            const rootPrefix = rootPath ? rootPath + "/" : "";
+
             // Recursively fetch files from all directories
             const allFiles = [];
             const fetchDir = async (dirPath) => {
@@ -705,20 +709,27 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     for (const item of res.items) {
                         if (item.type === "folder" && !item.name.startsWith(".") && item.name !== "node_modules" && item.name !== "__pycache__" && item.name !== "venv" && item.name !== ".git") {
                             // Recurse into subdirectories (limit depth to avoid too many requests)
-                            if (item.path.split("/").length <= 3) {
+                            const relPath = rootPrefix ? item.path.replace(rootPrefix, "") : item.path;
+                            if (relPath.split("/").length <= 3) {
                                 await fetchDir(item.path);
                             }
                         } else if (item.type === "file") {
                             // Check if file matches our extensions
                             if (Array.from(allExtensions).some(ext => item.name.endsWith(ext))) {
-                                allFiles.push(item);
+                                // Store path relative to the selected root, not workspace root
+                                const relativePath = rootPrefix ? item.path.replace(rootPrefix, "") : item.path;
+                                allFiles.push({
+                                    ...item,
+                                    path: relativePath,
+                                    fullPath: item.path // Keep original for reference
+                                });
                             }
                         }
                     }
                 }
             };
 
-            await fetchDir(selectedRoot === "/" ? "" : selectedRoot);
+            await fetchDir(rootPath);
             setProjectFiles(allFiles);
         } catch (e) {
             console.error("Failed to fetch files:", e);
