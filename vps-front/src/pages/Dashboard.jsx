@@ -45,6 +45,50 @@ export default function Dashboard() {
     const [newGroupName, setNewGroupName] = useState("");
     const [showSuccessMessage, setShowSuccessMessage] = useState(false);
     const [deletingGroupId, setDeletingGroupId] = useState(null);
+    const [loadingUser, setLoadingUser] = useState(true);
+
+    const loadUser = async (token, isRetry = false) => {
+        setLoadingUser(true);
+        setErr("");
+
+        try {
+            // Add timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            const res = await fetch(`${import.meta.env.VITE_API_BASE || "/api"}/me`, {
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data?.error || `Request failed (${res.status})`);
+            }
+
+            const d = await res.json();
+            setUser(d.user);
+            setLoadingUser(false);
+            fetchData();
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                setErr("Request timed out. Please try again.");
+                setLoadingUser(false);
+            } else if (isRetry) {
+                // On retry failure, show error but don't redirect
+                setErr(e.message || "Failed to load user data");
+                setLoadingUser(false);
+            } else {
+                // First attempt failure - might be stale token
+                clearToken();
+                nav("/login");
+            }
+        }
+    };
 
     useEffect(() => {
         const token = getToken();
@@ -65,16 +109,7 @@ export default function Dashboard() {
             setTimeout(() => setShowSuccessMessage(false), 5000);
         }
 
-        apiFetch("/me", { token })
-            .then((d) => {
-                setUser(d.user);
-                fetchData();
-            })
-            .catch((e) => {
-                setErr(e.message);
-                clearToken();
-                nav("/login");
-            });
+        loadUser(token);
     }, [nav]);
 
     const fetchData = async () => {
@@ -118,7 +153,53 @@ export default function Dashboard() {
         nav("/login");
     }
 
-    if (!user) return <div style={{ padding: 20 }}>Loading...</div>;
+    if (!user) {
+        return (
+            <div style={{ padding: 40, textAlign: "center" }}>
+                {loadingUser ? (
+                    <div>
+                        <div className="spinner" style={{ margin: "0 auto 15px" }}></div>
+                        <p>Loading...</p>
+                    </div>
+                ) : err ? (
+                    <div>
+                        <p style={{ color: "#c62828", marginBottom: 15 }}>{err}</p>
+                        <button
+                            onClick={() => {
+                                const token = getToken();
+                                if (token) loadUser(token, true);
+                                else nav("/login");
+                            }}
+                            style={{
+                                background: "#2196F3",
+                                color: "white",
+                                padding: "10px 20px",
+                                borderRadius: 6,
+                                border: "none",
+                                cursor: "pointer",
+                                marginRight: 10
+                            }}
+                        >
+                            Retry
+                        </button>
+                        <button
+                            onClick={() => { clearToken(); nav("/login"); }}
+                            style={{
+                                background: "#eee",
+                                color: "#333",
+                                padding: "10px 20px",
+                                borderRadius: 6,
+                                border: "none",
+                                cursor: "pointer"
+                            }}
+                        >
+                            Go to Login
+                        </button>
+                    </div>
+                ) : null}
+            </div>
+        );
+    }
 
     const connectGithub = () => {
         const token = getToken();
