@@ -5,6 +5,341 @@ import { apiFetch } from "../lib/api";
 // Reserved environment variable keys that are system-managed
 const RESERVED_KEYS = ['PORT', 'NODE_ENV', 'HOST'];
 
+// Runtime and Framework configurations for Backend
+const BACKEND_RUNTIMES = {
+    python: {
+        label: "Python",
+        icon: "🐍",
+        frameworks: {
+            fastapi: {
+                label: "FastAPI",
+                icon: "⚡",
+                installCmd: "pip install -r requirements.txt",
+                startCmd: (file) => `uvicorn ${file.replace('.py', '').replace(/\//g, '.')}:app --host 0.0.0.0 --port 8000`,
+                defaultFile: "main.py",
+                fileFilter: [".py"]
+            },
+            flask: {
+                label: "Flask",
+                icon: "🌶️",
+                installCmd: "pip install -r requirements.txt",
+                startCmd: (file) => `python ${file}`,
+                defaultFile: "app.py",
+                fileFilter: [".py"]
+            },
+            django: {
+                label: "Django",
+                icon: "🎸",
+                installCmd: "pip install -r requirements.txt",
+                startCmd: () => "python manage.py runserver 0.0.0.0:8000",
+                defaultFile: "manage.py",
+                fileFilter: [".py"]
+            },
+            plain: {
+                label: "Plain Python",
+                icon: "📄",
+                installCmd: "pip install -r requirements.txt",
+                startCmd: (file) => `python ${file}`,
+                defaultFile: "main.py",
+                fileFilter: [".py"]
+            }
+        }
+    },
+    nodejs: {
+        label: "Node.js",
+        icon: "🟢",
+        frameworks: {
+            express: {
+                label: "Express",
+                icon: "🚂",
+                installCmd: "npm install",
+                startCmd: (file) => `node ${file}`,
+                defaultFile: "index.js",
+                fileFilter: [".js", ".mjs", ".cjs"]
+            },
+            nestjs: {
+                label: "NestJS",
+                icon: "🐱",
+                installCmd: "npm install",
+                startCmd: () => "npm run start:prod",
+                defaultFile: "dist/main.js",
+                fileFilter: [".js", ".ts"]
+            },
+            fastify: {
+                label: "Fastify",
+                icon: "🚀",
+                installCmd: "npm install",
+                startCmd: (file) => `node ${file}`,
+                defaultFile: "index.js",
+                fileFilter: [".js", ".mjs"]
+            },
+            hono: {
+                label: "Hono",
+                icon: "🔥",
+                installCmd: "npm install",
+                startCmd: (file) => `node ${file}`,
+                defaultFile: "index.js",
+                fileFilter: [".js", ".ts"]
+            },
+            plain: {
+                label: "Plain Node.js",
+                icon: "📄",
+                installCmd: "npm install",
+                startCmd: (file) => `node ${file}`,
+                defaultFile: "index.js",
+                fileFilter: [".js", ".mjs", ".cjs"]
+            }
+        }
+    },
+    go: {
+        label: "Go",
+        icon: "🐹",
+        frameworks: {
+            gin: {
+                label: "Gin",
+                icon: "🍸",
+                installCmd: "go mod download",
+                startCmd: (file) => `go run ${file}`,
+                defaultFile: "main.go",
+                fileFilter: [".go"]
+            },
+            echo: {
+                label: "Echo",
+                icon: "📢",
+                installCmd: "go mod download",
+                startCmd: (file) => `go run ${file}`,
+                defaultFile: "main.go",
+                fileFilter: [".go"]
+            },
+            fiber: {
+                label: "Fiber",
+                icon: "⚡",
+                installCmd: "go mod download",
+                startCmd: (file) => `go run ${file}`,
+                defaultFile: "main.go",
+                fileFilter: [".go"]
+            },
+            plain: {
+                label: "Plain Go",
+                icon: "📄",
+                installCmd: "go mod download",
+                startCmd: (file) => `go run ${file}`,
+                defaultFile: "main.go",
+                fileFilter: [".go"]
+            }
+        }
+    },
+    bun: {
+        label: "Bun",
+        icon: "🥟",
+        frameworks: {
+            elysia: {
+                label: "Elysia",
+                icon: "🦊",
+                installCmd: "bun install",
+                startCmd: (file) => `bun run ${file}`,
+                defaultFile: "src/index.ts",
+                fileFilter: [".ts", ".js"]
+            },
+            hono: {
+                label: "Hono",
+                icon: "🔥",
+                installCmd: "bun install",
+                startCmd: (file) => `bun run ${file}`,
+                defaultFile: "src/index.ts",
+                fileFilter: [".ts", ".js"]
+            },
+            plain: {
+                label: "Plain Bun",
+                icon: "📄",
+                installCmd: "bun install",
+                startCmd: (file) => `bun run ${file}`,
+                defaultFile: "index.ts",
+                fileFilter: [".ts", ".js"]
+            }
+        }
+    },
+    deno: {
+        label: "Deno",
+        icon: "🦕",
+        frameworks: {
+            fresh: {
+                label: "Fresh",
+                icon: "🍋",
+                installCmd: "",
+                startCmd: () => "deno task start",
+                defaultFile: "main.ts",
+                fileFilter: [".ts", ".js"]
+            },
+            oak: {
+                label: "Oak",
+                icon: "🌳",
+                installCmd: "",
+                startCmd: (file) => `deno run --allow-net ${file}`,
+                defaultFile: "main.ts",
+                fileFilter: [".ts", ".js"]
+            },
+            plain: {
+                label: "Plain Deno",
+                icon: "📄",
+                installCmd: "",
+                startCmd: (file) => `deno run --allow-net ${file}`,
+                defaultFile: "main.ts",
+                fileFilter: [".ts", ".js"]
+            }
+        }
+    },
+    ruby: {
+        label: "Ruby",
+        icon: "💎",
+        frameworks: {
+            rails: {
+                label: "Rails",
+                icon: "🛤️",
+                installCmd: "bundle install",
+                startCmd: () => "rails server -b 0.0.0.0 -p 3000",
+                defaultFile: "config.ru",
+                fileFilter: [".rb"]
+            },
+            sinatra: {
+                label: "Sinatra",
+                icon: "🎤",
+                installCmd: "bundle install",
+                startCmd: (file) => `ruby ${file}`,
+                defaultFile: "app.rb",
+                fileFilter: [".rb"]
+            },
+            plain: {
+                label: "Plain Ruby",
+                icon: "📄",
+                installCmd: "bundle install",
+                startCmd: (file) => `ruby ${file}`,
+                defaultFile: "main.rb",
+                fileFilter: [".rb"]
+            }
+        }
+    },
+    php: {
+        label: "PHP",
+        icon: "🐘",
+        frameworks: {
+            laravel: {
+                label: "Laravel",
+                icon: "🔺",
+                installCmd: "composer install",
+                startCmd: () => "php artisan serve --host 0.0.0.0 --port 8000",
+                defaultFile: "artisan",
+                fileFilter: [".php"]
+            },
+            plain: {
+                label: "Plain PHP",
+                icon: "📄",
+                installCmd: "composer install",
+                startCmd: () => "php -S 0.0.0.0:8000",
+                defaultFile: "index.php",
+                fileFilter: [".php"]
+            }
+        }
+    },
+    rust: {
+        label: "Rust",
+        icon: "🦀",
+        frameworks: {
+            actix: {
+                label: "Actix Web",
+                icon: "🎭",
+                installCmd: "cargo build --release",
+                startCmd: () => "cargo run --release",
+                defaultFile: "src/main.rs",
+                fileFilter: [".rs"]
+            },
+            axum: {
+                label: "Axum",
+                icon: "🪓",
+                installCmd: "cargo build --release",
+                startCmd: () => "cargo run --release",
+                defaultFile: "src/main.rs",
+                fileFilter: [".rs"]
+            },
+            plain: {
+                label: "Plain Rust",
+                icon: "📄",
+                installCmd: "cargo build --release",
+                startCmd: () => "cargo run --release",
+                defaultFile: "src/main.rs",
+                fileFilter: [".rs"]
+            }
+        }
+    }
+};
+
+// Frontend Framework configurations
+const FRONTEND_FRAMEWORKS = {
+    react_vite: {
+        label: "React (Vite)",
+        icon: "⚛️",
+        installCmd: "npm install",
+        buildCmd: "npm run build",
+        outputDir: "dist"
+    },
+    react_cra: {
+        label: "React (CRA)",
+        icon: "⚛️",
+        installCmd: "npm install",
+        buildCmd: "npm run build",
+        outputDir: "build"
+    },
+    nextjs: {
+        label: "Next.js (Static)",
+        icon: "▲",
+        installCmd: "npm install",
+        buildCmd: "npm run build",
+        outputDir: "out"
+    },
+    vue: {
+        label: "Vue",
+        icon: "💚",
+        installCmd: "npm install",
+        buildCmd: "npm run build",
+        outputDir: "dist"
+    },
+    nuxt: {
+        label: "Nuxt (Static)",
+        icon: "💚",
+        installCmd: "npm install",
+        buildCmd: "npm run generate",
+        outputDir: ".output/public"
+    },
+    svelte: {
+        label: "Svelte/SvelteKit",
+        icon: "🔶",
+        installCmd: "npm install",
+        buildCmd: "npm run build",
+        outputDir: "build"
+    },
+    angular: {
+        label: "Angular",
+        icon: "🅰️",
+        installCmd: "npm install",
+        buildCmd: "npm run build",
+        outputDir: "dist"
+    },
+    astro: {
+        label: "Astro",
+        icon: "🚀",
+        installCmd: "npm install",
+        buildCmd: "npm run build",
+        outputDir: "dist"
+    },
+    html: {
+        label: "Plain HTML",
+        icon: "📄",
+        installCmd: "",
+        buildCmd: "",
+        outputDir: "."
+    }
+};
+
 export default function DeploymentWizard({ onComplete, onCancel, groupId, role, groupSlug }) {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
@@ -50,8 +385,20 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
         outputDir: "dist",
         spaRouting: true,
         // Server-specific settings
-        startCommand: ""
+        startCommand: "",
+        installCommand: ""
     });
+
+    // Backend runtime/framework selection
+    const [selectedRuntime, setSelectedRuntime] = useState("");
+    const [selectedFramework, setSelectedFramework] = useState("");
+    const [entryFile, setEntryFile] = useState("");
+    const [projectFiles, setProjectFiles] = useState([]);
+    const [showFilePicker, setShowFilePicker] = useState(false);
+    const [useCustomCommand, setUseCustomCommand] = useState(false);
+
+    // Frontend framework selection
+    const [selectedFrontendFramework, setSelectedFrontendFramework] = useState("");
 
     // Step 5: Env Vars
     const [envVars, setEnvVars] = useState([]);
@@ -234,20 +581,30 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
             });
 
             if (siteType === "server") {
-                // Server settings
-                setBuildSettings({
+                // Server settings - use auto-detection with new UI
+                setBuildSettings(prev => ({
+                    ...prev,
                     packageManager: res.project.packageManager || "npm",
-                    startCommand: res.project.startCommand || "npm start",
+                    startCommand: res.project.startCommand || "",
+                    installCommand: res.project.buildCommand || "",
                     buildCommand: res.project.buildCommand || ""
-                });
+                }));
+
+                // Auto-detect runtime and framework for the new UI
+                autoDetectFromAnalysis(res.project);
             } else {
-                // Static site settings
-                setBuildSettings({
+                // Static site settings - use auto-detection with new UI
+                setBuildSettings(prev => ({
+                    ...prev,
                     packageManager: res.project.packageManager || "npm",
                     buildCommand: res.project.buildCommand || "",
                     outputDir: res.project.outputDir || "dist",
+                    installCommand: "npm install",
                     spaRouting: true
-                });
+                }));
+
+                // Auto-detect frontend framework
+                autoDetectFromAnalysis(res.project);
             }
             setStep(5);
         } catch (e) { alert(e.message); }
@@ -261,7 +618,8 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                 ? {
                     packageManager: buildSettings.packageManager,
                     startCommand: buildSettings.startCommand,
-                    buildCommand: buildSettings.buildCommand
+                    // For servers, installCommand maps to buildCommand in the API
+                    buildCommand: buildSettings.installCommand || buildSettings.buildCommand
                 }
                 : {
                     packageManager: buildSettings.packageManager,
@@ -324,6 +682,192 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                 }
             } catch (e) { clearInterval(interval); }
         }, 2000);
+    };
+
+    // Fetch files for entry file picker (recursive to get all files)
+    const fetchProjectFiles = async (runtime) => {
+        if (!projectId) return;
+        try {
+            const runtimeConfig = BACKEND_RUNTIMES[runtime];
+            if (!runtimeConfig) return;
+
+            // Get file extensions for the selected runtime
+            const allExtensions = new Set();
+            Object.values(runtimeConfig.frameworks).forEach(fw => {
+                fw.fileFilter.forEach(ext => allExtensions.add(ext));
+            });
+
+            // Recursively fetch files from all directories
+            const allFiles = [];
+            const fetchDir = async (dirPath) => {
+                const res = await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(dirPath)}`, { token: getToken() });
+                if (res.items) {
+                    for (const item of res.items) {
+                        if (item.type === "folder" && !item.name.startsWith(".") && item.name !== "node_modules" && item.name !== "__pycache__" && item.name !== "venv" && item.name !== ".git") {
+                            // Recurse into subdirectories (limit depth to avoid too many requests)
+                            if (item.path.split("/").length <= 3) {
+                                await fetchDir(item.path);
+                            }
+                        } else if (item.type === "file") {
+                            // Check if file matches our extensions
+                            if (Array.from(allExtensions).some(ext => item.name.endsWith(ext))) {
+                                allFiles.push(item);
+                            }
+                        }
+                    }
+                }
+            };
+
+            await fetchDir(selectedRoot === "/" ? "" : selectedRoot);
+            setProjectFiles(allFiles);
+        } catch (e) {
+            console.error("Failed to fetch files:", e);
+            setProjectFiles([]);
+        }
+    };
+
+    // Generate commands based on runtime, framework, and entry file
+    const generateCommands = (runtime, framework, file) => {
+        if (!runtime || !framework) return { installCmd: "", startCmd: "" };
+
+        const runtimeConfig = BACKEND_RUNTIMES[runtime];
+        const frameworkConfig = runtimeConfig?.frameworks[framework];
+
+        if (!frameworkConfig) return { installCmd: "", startCmd: "" };
+
+        const installCmd = frameworkConfig.installCmd || "";
+        const startCmd = typeof frameworkConfig.startCmd === "function"
+            ? frameworkConfig.startCmd(file || frameworkConfig.defaultFile)
+            : frameworkConfig.startCmd;
+
+        return { installCmd, startCmd };
+    };
+
+    // Handle runtime change
+    const handleRuntimeChange = (runtime) => {
+        setSelectedRuntime(runtime);
+        setSelectedFramework("");
+        setEntryFile("");
+        setProjectFiles([]);
+        setUseCustomCommand(false);
+
+        // Fetch files for this runtime
+        if (runtime) {
+            fetchProjectFiles(runtime);
+        }
+    };
+
+    // Handle framework change
+    const handleFrameworkChange = (framework) => {
+        setSelectedFramework(framework);
+
+        if (selectedRuntime && framework) {
+            const frameworkConfig = BACKEND_RUNTIMES[selectedRuntime]?.frameworks[framework];
+            if (frameworkConfig) {
+                setEntryFile(frameworkConfig.defaultFile);
+                const { installCmd, startCmd } = generateCommands(selectedRuntime, framework, frameworkConfig.defaultFile);
+                setBuildSettings(prev => ({
+                    ...prev,
+                    installCommand: installCmd,
+                    startCommand: startCmd
+                }));
+            }
+        }
+    };
+
+    // Handle entry file change
+    const handleEntryFileChange = (file) => {
+        setEntryFile(file);
+        setShowFilePicker(false);
+
+        if (selectedRuntime && selectedFramework) {
+            const { installCmd, startCmd } = generateCommands(selectedRuntime, selectedFramework, file);
+            setBuildSettings(prev => ({
+                ...prev,
+                installCommand: installCmd,
+                startCommand: startCmd
+            }));
+        }
+    };
+
+    // Handle frontend framework change
+    const handleFrontendFrameworkChange = (framework) => {
+        setSelectedFrontendFramework(framework);
+        const config = FRONTEND_FRAMEWORKS[framework];
+        if (config) {
+            setBuildSettings(prev => ({
+                ...prev,
+                buildCommand: config.buildCmd,
+                outputDir: config.outputDir,
+                installCommand: config.installCmd
+            }));
+        }
+    };
+
+    // Auto-detect runtime and framework from project analysis
+    const autoDetectFromAnalysis = (analysisResult) => {
+        const { runtime, framework } = analysisResult;
+
+        // Map backend analyzer results to our config keys
+        const runtimeMap = {
+            "node": "nodejs",
+            "python": "python",
+            "go": "go",
+            "bun": "bun",
+            "deno": "deno",
+            "ruby": "ruby",
+            "php": "php",
+            "rust": "rust"
+        };
+
+        const frameworkMap = {
+            "express": "express",
+            "fastify": "fastify",
+            "nestjs": "nestjs",
+            "hono": "hono",
+            "fastapi": "fastapi",
+            "flask": "flask",
+            "django": "django",
+            "gin": "gin",
+            "echo": "echo",
+            "fiber": "fiber",
+            "elysia": "elysia",
+            "rails": "rails",
+            "sinatra": "sinatra",
+            "laravel": "laravel",
+            "actix": "actix",
+            "axum": "axum"
+        };
+
+        const frontendFrameworkMap = {
+            "react": "react_vite",
+            "vue": "vue",
+            "svelte": "svelte",
+            "angular": "angular",
+            "next": "nextjs",
+            "nuxt": "nuxt",
+            "astro": "astro"
+        };
+
+        if (siteType === "server") {
+            const detectedRuntime = runtimeMap[runtime?.toLowerCase()] || "";
+            const detectedFramework = frameworkMap[framework?.toLowerCase()] || "plain";
+
+            if (detectedRuntime) {
+                setSelectedRuntime(detectedRuntime);
+                fetchProjectFiles(detectedRuntime);
+
+                if (detectedFramework && BACKEND_RUNTIMES[detectedRuntime]?.frameworks[detectedFramework]) {
+                    setSelectedFramework(detectedFramework);
+                    const fwConfig = BACKEND_RUNTIMES[detectedRuntime].frameworks[detectedFramework];
+                    setEntryFile(fwConfig.defaultFile);
+                }
+            }
+        } else {
+            // Frontend framework detection
+            const detectedFrontend = frontendFrameworkMap[framework?.toLowerCase()] || "react_vite";
+            setSelectedFrontendFramework(detectedFrontend);
+        }
     };
 
     // Auto-scroll logs
@@ -799,82 +1343,326 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
             {step === 5 && (
                 <div className="fade-in">
                     <h3 style={stepTitle}>Step {role ? 4 : 5}: {siteType === "server" ? "Server Settings" : "Build Settings"}</h3>
-                    <p style={stepDesc}>{siteType === "server" ? "Configure your server runtime settings." : "We auto-detected these settings. Tweaks allowed."}</p>
+                    <p style={stepDesc}>
+                        {siteType === "server"
+                            ? "Select your runtime and framework to auto-configure deployment."
+                            : "Select your framework to auto-configure build settings."
+                        }
+                    </p>
 
-                    <div style={{ display: "grid", gap: 20, marginBottom: 25 }}>
-                        <div>
-                            <label style={labelStyle}>Package Manager</label>
-                            <select value={buildSettings.packageManager} onChange={e => setBuildSettings({...buildSettings, packageManager: e.target.value})} style={inputStyle}>
-                                <option value="npm">npm</option>
-                                <option value="yarn">yarn</option>
-                                <option value="pnpm">pnpm</option>
-                                <option value="pip">pip (Python)</option>
-                                <option value="pipenv">pipenv (Python)</option>
-                                <option value="poetry">poetry (Python)</option>
-                                {siteType !== "server" && <option value="static">None (Static HTML)</option>}
-                            </select>
+                    {siteType === "server" ? (
+                        /* ========== BACKEND SERVER SETTINGS ========== */
+                        <div style={{ display: "grid", gap: 20, marginBottom: 25 }}>
+                            {/* Runtime Selection */}
+                            <div>
+                                <label style={labelStyle}>Runtime</label>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                    {Object.entries(BACKEND_RUNTIMES).map(([key, runtime]) => (
+                                        <button
+                                            key={key}
+                                            onClick={() => handleRuntimeChange(key)}
+                                            style={{
+                                                padding: "10px 16px",
+                                                borderRadius: 8,
+                                                border: selectedRuntime === key ? "2px solid #2196F3" : "1px solid #ddd",
+                                                background: selectedRuntime === key ? "#e3f2fd" : "white",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 6,
+                                                fontSize: "0.9em",
+                                                fontWeight: selectedRuntime === key ? 600 : 400,
+                                                transition: "all 0.2s"
+                                            }}
+                                        >
+                                            <span>{runtime.icon}</span>
+                                            <span>{runtime.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Framework Selection (shown after runtime is selected) */}
+                            {selectedRuntime && (
+                                <div>
+                                    <label style={labelStyle}>Framework</label>
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                        {Object.entries(BACKEND_RUNTIMES[selectedRuntime].frameworks).map(([key, fw]) => (
+                                            <button
+                                                key={key}
+                                                onClick={() => handleFrameworkChange(key)}
+                                                style={{
+                                                    padding: "10px 16px",
+                                                    borderRadius: 8,
+                                                    border: selectedFramework === key ? "2px solid #2196F3" : "1px solid #ddd",
+                                                    background: selectedFramework === key ? "#e3f2fd" : "white",
+                                                    cursor: "pointer",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: 6,
+                                                    fontSize: "0.9em",
+                                                    fontWeight: selectedFramework === key ? 600 : 400,
+                                                    transition: "all 0.2s"
+                                                }}
+                                            >
+                                                <span>{fw.icon}</span>
+                                                <span>{fw.label}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Entry File Selection (shown after framework is selected) */}
+                            {selectedRuntime && selectedFramework && (
+                                <div>
+                                    <label style={labelStyle}>Entry File</label>
+                                    <div style={{ display: "flex", gap: 10 }}>
+                                        <input
+                                            value={entryFile}
+                                            onChange={e => handleEntryFileChange(e.target.value)}
+                                            placeholder="e.g. main.py, index.js"
+                                            style={{ ...inputStyle, flex: 1 }}
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                fetchProjectFiles(selectedRuntime);
+                                                setShowFilePicker(!showFilePicker);
+                                            }}
+                                            style={{
+                                                padding: "10px 16px",
+                                                borderRadius: 6,
+                                                border: "1px solid #ddd",
+                                                background: "#f5f5f5",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 6
+                                            }}
+                                        >
+                                            📂 Browse
+                                        </button>
+                                    </div>
+
+                                    {/* File Picker Dropdown */}
+                                    {showFilePicker && projectFiles.length > 0 && (
+                                        <div style={{
+                                            marginTop: 8,
+                                            border: "1px solid #ddd",
+                                            borderRadius: 8,
+                                            maxHeight: 200,
+                                            overflowY: "auto",
+                                            background: "white"
+                                        }}>
+                                            {projectFiles.map((file, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    onClick={() => handleEntryFileChange(file.path || file.name)}
+                                                    style={{
+                                                        padding: "10px 12px",
+                                                        cursor: "pointer",
+                                                        borderBottom: "1px solid #f0f0f0",
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: 8,
+                                                        background: entryFile === (file.path || file.name) ? "#e3f2fd" : "white"
+                                                    }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
+                                                    onMouseLeave={e => e.currentTarget.style.background = entryFile === (file.path || file.name) ? "#e3f2fd" : "white"}
+                                                >
+                                                    <span>📄</span>
+                                                    <span style={{ fontFamily: "monospace", fontSize: "0.9em" }}>{file.path || file.name}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {showFilePicker && projectFiles.length === 0 && (
+                                        <div style={{ marginTop: 8, padding: 12, background: "#fff3cd", borderRadius: 6, fontSize: "0.85em", color: "#856404" }}>
+                                            No matching files found. Enter the path manually.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Generated Commands Preview */}
+                            {selectedRuntime && selectedFramework && (
+                                <div style={{
+                                    background: "#f8f9fa",
+                                    border: "1px solid #e9ecef",
+                                    borderRadius: 8,
+                                    padding: 16
+                                }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                                        <span style={{ fontWeight: 600, color: "#495057" }}>💡 Generated Commands</span>
+                                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85em", cursor: "pointer" }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={useCustomCommand}
+                                                onChange={e => setUseCustomCommand(e.target.checked)}
+                                            />
+                                            <span>Edit manually</span>
+                                        </label>
+                                    </div>
+
+                                    <div style={{ display: "grid", gap: 12 }}>
+                                        <div>
+                                            <label style={{ fontSize: "0.8em", color: "#6c757d", display: "block", marginBottom: 4 }}>Install Command</label>
+                                            <input
+                                                value={buildSettings.installCommand || ""}
+                                                onChange={e => setBuildSettings({...buildSettings, installCommand: e.target.value})}
+                                                disabled={!useCustomCommand}
+                                                style={{
+                                                    ...inputStyle,
+                                                    fontFamily: "monospace",
+                                                    fontSize: "0.9em",
+                                                    background: useCustomCommand ? "white" : "#e9ecef",
+                                                    color: useCustomCommand ? "#212529" : "#6c757d"
+                                                }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: "0.8em", color: "#6c757d", display: "block", marginBottom: 4 }}>Start Command</label>
+                                            <input
+                                                value={buildSettings.startCommand}
+                                                onChange={e => setBuildSettings({...buildSettings, startCommand: e.target.value})}
+                                                disabled={!useCustomCommand}
+                                                style={{
+                                                    ...inputStyle,
+                                                    fontFamily: "monospace",
+                                                    fontSize: "0.9em",
+                                                    background: useCustomCommand ? "white" : "#e9ecef",
+                                                    color: useCustomCommand ? "#212529" : "#6c757d"
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
+                    ) : (
+                        /* ========== FRONTEND STATIC SETTINGS ========== */
+                        <div style={{ display: "grid", gap: 20, marginBottom: 25 }}>
+                            {/* Frontend Framework Selection */}
+                            <div>
+                                <label style={labelStyle}>Framework</label>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                    {Object.entries(FRONTEND_FRAMEWORKS).map(([key, fw]) => (
+                                        <button
+                                            key={key}
+                                            onClick={() => handleFrontendFrameworkChange(key)}
+                                            style={{
+                                                padding: "10px 16px",
+                                                borderRadius: 8,
+                                                border: selectedFrontendFramework === key ? "2px solid #2196F3" : "1px solid #ddd",
+                                                background: selectedFrontendFramework === key ? "#e3f2fd" : "white",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 6,
+                                                fontSize: "0.9em",
+                                                fontWeight: selectedFrontendFramework === key ? 600 : 400,
+                                                transition: "all 0.2s"
+                                            }}
+                                        >
+                                            <span>{fw.icon}</span>
+                                            <span>{fw.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
 
-                        {siteType === "server" ? (
-                            <>
-                                <div>
-                                    <label style={labelStyle}>Install Command</label>
-                                    <input
-                                        value={buildSettings.buildCommand || ""}
-                                        onChange={e => setBuildSettings({...buildSettings, buildCommand: e.target.value})}
-                                        placeholder="e.g. pip install -r requirements.txt"
-                                        style={inputStyle}
-                                    />
+                            {/* Generated Commands Preview */}
+                            {selectedFrontendFramework && (
+                                <div style={{
+                                    background: "#f8f9fa",
+                                    border: "1px solid #e9ecef",
+                                    borderRadius: 8,
+                                    padding: 16
+                                }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                                        <span style={{ fontWeight: 600, color: "#495057" }}>💡 Generated Commands</span>
+                                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85em", cursor: "pointer" }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={useCustomCommand}
+                                                onChange={e => setUseCustomCommand(e.target.checked)}
+                                            />
+                                            <span>Edit manually</span>
+                                        </label>
+                                    </div>
+
+                                    <div style={{ display: "grid", gap: 12 }}>
+                                        <div>
+                                            <label style={{ fontSize: "0.8em", color: "#6c757d", display: "block", marginBottom: 4 }}>Install Command</label>
+                                            <input
+                                                value={buildSettings.installCommand || ""}
+                                                onChange={e => setBuildSettings({...buildSettings, installCommand: e.target.value})}
+                                                disabled={!useCustomCommand}
+                                                style={{
+                                                    ...inputStyle,
+                                                    fontFamily: "monospace",
+                                                    fontSize: "0.9em",
+                                                    background: useCustomCommand ? "white" : "#e9ecef"
+                                                }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: "0.8em", color: "#6c757d", display: "block", marginBottom: 4 }}>Build Command</label>
+                                            <input
+                                                value={buildSettings.buildCommand}
+                                                onChange={e => setBuildSettings({...buildSettings, buildCommand: e.target.value})}
+                                                disabled={!useCustomCommand}
+                                                style={{
+                                                    ...inputStyle,
+                                                    fontFamily: "monospace",
+                                                    fontSize: "0.9em",
+                                                    background: useCustomCommand ? "white" : "#e9ecef"
+                                                }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: "0.8em", color: "#6c757d", display: "block", marginBottom: 4 }}>Output Directory</label>
+                                            <input
+                                                value={buildSettings.outputDir}
+                                                onChange={e => setBuildSettings({...buildSettings, outputDir: e.target.value})}
+                                                disabled={!useCustomCommand}
+                                                style={{
+                                                    ...inputStyle,
+                                                    fontFamily: "monospace",
+                                                    fontSize: "0.9em",
+                                                    background: useCustomCommand ? "white" : "#e9ecef"
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label style={labelStyle}>Start Command</label>
-                                    <input
-                                        value={buildSettings.startCommand}
-                                        onChange={e => setBuildSettings({...buildSettings, startCommand: e.target.value})}
-                                        placeholder="e.g. npm start, python app.py"
-                                        style={inputStyle}
-                                    />
-                                    <small style={{ color: "#666", fontSize: "0.85em", display: "block", marginTop: 5 }}>
-                                        Port will be automatically configured based on your framework.
-                                    </small>
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <div>
-                                    <label style={labelStyle}>Build Command</label>
-                                    <input
-                                        value={buildSettings.buildCommand}
-                                        onChange={e => setBuildSettings({...buildSettings, buildCommand: e.target.value})}
-                                        placeholder="e.g. npm run build"
-                                        style={inputStyle}
-                                    />
-                                </div>
-                                <div>
-                                    <label style={labelStyle}>Output Directory</label>
-                                    <input
-                                        value={buildSettings.outputDir}
-                                        onChange={e => setBuildSettings({...buildSettings, outputDir: e.target.value})}
-                                        placeholder="e.g. dist"
-                                        style={inputStyle}
-                                    />
-                                </div>
-                                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={buildSettings.spaRouting}
-                                        onChange={e => setBuildSettings({...buildSettings, spaRouting: e.target.checked})}
-                                        style={{ width: 18, height: 18 }}
-                                    />
-                                    <span><b>SPA Routing</b> (Redirect 404s to index.html)</span>
-                                </label>
-                            </>
-                        )}
-                    </div>
+                            )}
+
+                            {/* SPA Routing Option */}
+                            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                                <input
+                                    type="checkbox"
+                                    checked={buildSettings.spaRouting}
+                                    onChange={e => setBuildSettings({...buildSettings, spaRouting: e.target.checked})}
+                                    style={{ width: 18, height: 18 }}
+                                />
+                                <span><b>SPA Routing</b> (Redirect 404s to index.html)</span>
+                            </label>
+                        </div>
+                    )}
 
                     <div style={{ display: "flex", gap: 10 }}>
                         <button onClick={() => setStep(4)} style={secondaryBtn}>← Back</button>
-                        <button onClick={saveSettings} style={primaryBtn}>Next: Env Vars →</button>
+                        <button
+                            onClick={saveSettings}
+                            disabled={siteType === "server" ? (!selectedRuntime || !selectedFramework) : !selectedFrontendFramework}
+                            style={{
+                                ...primaryBtn,
+                                opacity: (siteType === "server" ? (!selectedRuntime || !selectedFramework) : !selectedFrontendFramework) ? 0.5 : 1
+                            }}
+                        >
+                            Next: Env Vars →
+                        </button>
                     </div>
                 </div>
             )}
