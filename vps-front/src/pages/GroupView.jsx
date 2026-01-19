@@ -21,6 +21,7 @@ export default function GroupView() {
     // Wizard states
     const [showWizard, setShowWizard] = useState(false);
     const [wizardRole, setWizardRole] = useState(null); // 'FRONTEND' or 'BACKEND'
+    const [wizardProject, setWizardProject] = useState(null); // For editing/redeploying existing project
     const [showDbModal, setShowDbModal] = useState(false);
 
     // Action states
@@ -183,6 +184,12 @@ export default function GroupView() {
         }, 2000);
     };
 
+    const openConfigureWizard = (project, role) => {
+        setWizardRole(role);
+        setWizardProject(project);
+        setShowWizard(true);
+    };
+
     if (err) return <div style={{ padding: 40, textAlign: "center" }}>Error: {err}</div>;
     if (!group) return <div style={{ padding: 40 }}>Loading...</div>;
 
@@ -238,16 +245,20 @@ export default function GroupView() {
             {showWizard && (
                 <div style={{ marginBottom: 30, padding: 20, background: "#f9f9f9", borderRadius: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-                        <h3 style={{ margin: 0 }}>Deploy {wizardRole === "FRONTEND" ? "Frontend" : "Backend"}</h3>
-                        <button onClick={() => { setShowWizard(false); setWizardRole(null); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.2em" }}>×</button>
+                        <h3 style={{ margin: 0 }}>
+                            {wizardProject ? `Configure ${wizardRole === "FRONTEND" ? "Frontend" : "Backend"}` : `Deploy ${wizardRole === "FRONTEND" ? "Frontend" : "Backend"}`}
+                        </h3>
+                        <button onClick={() => { setShowWizard(false); setWizardRole(null); setWizardProject(null); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.2em" }}>×</button>
                     </div>
                     <DeploymentWizard
                         groupId={groupId}
                         role={wizardRole}
                         groupSlug={group.slug}
+                        existingProject={wizardProject}
                         onComplete={() => {
                             setShowWizard(false);
                             setWizardRole(null);
+                            setWizardProject(null);
                             fetchGroup();
                         }}
                     />
@@ -278,9 +289,10 @@ export default function GroupView() {
                         hasComponent={group.hasFrontend}
                         isDeleting={deletingComponent?.toLowerCase() === "frontend"}
                         isRedeploying={redeployingComponent?.toLowerCase() === "frontend"}
-                        onAdd={() => { setWizardRole("FRONTEND"); setShowWizard(true); }}
+                        onAdd={() => { setWizardRole("FRONTEND"); setWizardProject(null); setShowWizard(true); }}
                         onDelete={() => deleteComponent(group.frontend?.id, "Frontend")}
                         onRedeploy={() => redeployComponent(group.frontend?.id, "Frontend")}
+                        onConfigure={() => openConfigureWizard(group.frontend, "FRONTEND")}
                         onViewLogs={() => setViewingLogsDeploymentId(group.frontend?.latestDeployment?.id)}
                         onManageFiles={() => {
                             if (group.frontend?.id) {
@@ -300,9 +312,10 @@ export default function GroupView() {
                         hasComponent={group.hasBackend}
                         isDeleting={deletingComponent?.toLowerCase() === "backend"}
                         isRedeploying={redeployingComponent?.toLowerCase() === "backend"}
-                        onAdd={() => { setWizardRole("BACKEND"); setShowWizard(true); }}
+                        onAdd={() => { setWizardRole("BACKEND"); setWizardProject(null); setShowWizard(true); }}
                         onDelete={() => deleteComponent(group.backend?.id, "Backend")}
                         onRedeploy={() => redeployComponent(group.backend?.id, "Backend")}
+                        onConfigure={() => openConfigureWizard(group.backend, "BACKEND")}
                         onViewLogs={() => setViewingLogsDeploymentId(group.backend?.latestDeployment?.id)}
                         onManageFiles={() => {
                             if (group.backend?.id) {
@@ -407,6 +420,7 @@ function ComponentCard({
     onAdd,
     onDelete,
     onRedeploy,
+    onConfigure,
     onViewLogs,
     onManageFiles,
     onManageStorage,
@@ -468,8 +482,7 @@ function ComponentCard({
             background: "white",
             position: "relative"
         }}>
-            {/* Loading overlay - only if NOT viewing logs (because modal covers it) */}
-            {/* Actually we can keep it, it's fine */}
+            {/* Loading overlay */}
             {(isDeleting || isRedeploying) && (
                 <div style={{
                     position: "absolute",
@@ -544,7 +557,8 @@ function ComponentCard({
                             {component?.latestDeployment && (
                                 <MenuButton onClick={() => { setMenuOpen(false); onViewLogs(); }}>📜 View Logs</MenuButton>
                             )}
-                            <MenuButton onClick={() => { setMenuOpen(false); onRedeploy(); }} color="#2196F3">🚀 Redeploy</MenuButton>
+                            <MenuButton onClick={() => { setMenuOpen(false); onConfigure(); }}>🔧 Configure & Redeploy</MenuButton>
+                            <MenuButton onClick={() => { setMenuOpen(false); onRedeploy(); }} color="#2196F3">🚀 Quick Redeploy</MenuButton>
                             {showExecuteScript && (
                                 <MenuButton onClick={() => { setMenuOpen(false); onExecuteScript(); }}>▶️ Execute Script</MenuButton>
                             )}
@@ -570,13 +584,13 @@ function ComponentCard({
                 
                 {component?.deploymentStatus === "FAILED" && (
                     <button 
-                        onClick={onRedeploy}
+                        onClick={onConfigure}
                         style={{
                             background: "#c62828", color: "white", border: "none",
                             padding: "4px 12px", borderRadius: 20, fontSize: "0.8em", cursor: "pointer", fontWeight: 500
                         }}
                     >
-                        ↻ Retry
+                        ↻ Retry with Options
                     </button>
                 )}
             </div>

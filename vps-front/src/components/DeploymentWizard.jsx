@@ -340,8 +340,8 @@ const FRONTEND_FRAMEWORKS = {
     }
 };
 
-export default function DeploymentWizard({ onComplete, onCancel, groupId, role, groupSlug }) {
-    const [step, setStep] = useState(1);
+export default function DeploymentWizard({ onComplete, onCancel, groupId, role, groupSlug, existingProject }) {
+    const [step, setStep] = useState(existingProject ? 5 : 1);
     const [loading, setLoading] = useState(false);
     const [envError, setEnvError] = useState("");
 
@@ -355,12 +355,16 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
     // Step 2: Create Site
     // Pre-fill name with groupSlug + role to ensure uniqueness (e.g., "mypr Frontend")
     const [siteName, setSiteName] = useState(
-        role ? `${groupSlug || ''} ${role === "FRONTEND" ? "Frontend" : "Backend"}`.trim() : ""
+        existingProject ? existingProject.name :
+        (role ? `${groupSlug || ''} ${role === "FRONTEND" ? "Frontend" : "Backend"}`.trim() : "")
     );
     // When role is provided, we don't need a custom slug - it's derived from groupSlug + role
-    const [siteSlug, setSiteSlug] = useState("");
+    const [siteSlug, setSiteSlug] = useState(existingProject ? existingProject.slug : "");
     // When role is provided, site type is pre-determined (FRONTEND -> static, BACKEND -> server)
-    const [siteType, setSiteType] = useState(role === "BACKEND" ? "server" : "static");
+    const [siteType, setSiteType] = useState(
+        existingProject ? (existingProject.deployType === "BACKEND" ? "server" : "static") :
+        (role === "BACKEND" ? "server" : "static")
+    );
 
     // Step 3a: GitHub Source
     const [repos, setRepos] = useState([]);
@@ -373,10 +377,10 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
     const [uploadProgress, setUploadProgress] = useState(0);
 
     // Step 3: Select Root
-    const [projectId, setProjectId] = useState(null);
-    const [projectData, setProjectData] = useState(null);
+    const [projectId, setProjectId] = useState(existingProject ? existingProject.id : null);
+    const [projectData, setProjectData] = useState(existingProject || null);
     const [folderTree, setFolderTree] = useState(null);
-    const [selectedRoot, setSelectedRoot] = useState("/");
+    const [selectedRoot, setSelectedRoot] = useState(existingProject?.rootDir || "/");
 
     // Step 4: Build Settings
     const [buildSettings, setBuildSettings] = useState({
@@ -389,6 +393,10 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
         installCommand: ""
     });
 
+    // Backend persistent storage
+    const [staticFolder, setStaticFolder] = useState("uploads");
+    const [showStorageHelp, setShowStorageHelp] = useState(false);
+
     // Backend runtime/framework selection
     const [selectedRuntime, setSelectedRuntime] = useState("");
     const [selectedFramework, setSelectedFramework] = useState("");
@@ -396,10 +404,6 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
     const [projectFiles, setProjectFiles] = useState([]);
     const [showFilePicker, setShowFilePicker] = useState(false);
     const [useCustomCommand, setUseCustomCommand] = useState(false);
-
-    // Backend persistent storage
-    const [staticFolder, setStaticFolder] = useState("uploads");
-    const [showStorageHelp, setShowStorageHelp] = useState(false);
 
     // Frontend framework selection
     const [selectedFrontendFramework, setSelectedFrontendFramework] = useState("");
@@ -416,16 +420,57 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
     const [deployment, setDeployment] = useState(null);
     const [logs, setLogs] = useState("");
 
+    // Initialize from existing project
+    useEffect(() => {
+        if (existingProject) {
+            setProjectId(existingProject.id);
+            setProjectData(existingProject);
+            setSiteName(existingProject.name);
+            const isServer = existingProject.deployType === "BACKEND";
+            setSiteType(isServer ? "server" : "static");
+            
+            // Populate build settings
+            setBuildSettings({
+                packageManager: existingProject.packageManager || "npm",
+                buildCommand: existingProject.buildCommand || "",
+                outputDir: existingProject.outputDir || "dist",
+                startCommand: existingProject.startCommand || "",
+                // For server, installCommand maps to buildCommand in DB (see saveSettings)
+                installCommand: isServer ? (existingProject.buildCommand || "") : "",
+                spaRouting: true
+            });
+
+            // Set persistent storage
+            setStaticFolder(existingProject.staticFolder || "uploads");
+
+            // Trigger auto-detection UI state setup
+            autoDetectFromAnalysis({
+                runtime: existingProject.runtime,
+                framework: existingProject.framework
+            });
+            
+            // Also fetch env vars
+            apiFetch(`/projects/${existingProject.id}/env-vars`, { token: getToken() })
+                .then(vars => setEnvVars(vars))
+                .catch(console.error);
+                
+            // Fetch folder tree just in case user wants to change root (go back to step 4)
+             apiFetch(`/projects/${existingProject.id}/tree`, { token: getToken() })
+                .then(treeData => setFolderTree(treeData.tree))
+                .catch(console.error);
+        }
+    }, [existingProject]);
+
     // Effects
     useEffect(() => {
-        if (siteName && step === 2) {
+        if (siteName && step === 2 && !existingProject) {
             // When role is provided, slug is handled by backend (groupSlug-role)
             // Only set siteSlug for legacy standalone projects
             if (!role) {
                 setSiteSlug(siteName.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 50));
             }
         }
-    }, [siteName, step, role]);
+    }, [siteName, step, role, existingProject]);
 
     const fetchRepos = async () => {
         setLoading(true);
@@ -1028,12 +1073,18 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
     // Mapping: actual step -> display step (for role-based)
     // 1->1, 3->2, 4->3, 5->4, 6->5, 7->6
     const getDisplayStep = (actualStep) => {
+        if (existingProject) {
+            // Steps: 4 (Root), 5 (Settings), 6 (Env), 7 (Deploy)
+            // Display: 1, 2, 3, 4
+            if (actualStep < 4) return 1;
+            return actualStep - 3;
+        }
         if (!role) return actualStep;
         if (actualStep === 1) return 1;
         if (actualStep >= 3) return actualStep - 1;
         return actualStep;
     };
-    const totalSteps = role ? 6 : 7;
+    const totalSteps = existingProject ? 4 : (role ? 6 : 7);
     const displayStep = getDisplayStep(step);
 
     return (
@@ -1048,8 +1099,18 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
                     }} />
                 ))}
             </div>
+            
+            {/* Header for Edit Mode */}
+            {existingProject && (
+                <div style={{ marginBottom: 20, paddingBottom: 15, borderBottom: "1px solid #eee" }}>
+                    <h3 style={{ margin: "0 0 5px 0" }}>Configure & Redeploy</h3>
+                    <div style={{ color: "#666", fontSize: "0.9em" }}>
+                        Project: <b>{existingProject.name}</b> • {siteType === "server" ? "Backend Server" : "Static Site"}
+                    </div>
+                </div>
+            )}
 
-            {step === 1 && (
+            {step === 1 && !existingProject && (
                 <div className="fade-in">
                     <h3 style={stepTitle}>Step 1: Choose Source</h3>
                     <p style={stepDesc}>How do you want to deploy your site?</p>
@@ -1340,16 +1401,21 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
             {step === 4 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step {role ? 3 : 4}: Select Root Folder</h3>
+                    <h3 style={stepTitle}>Step {existingProject ? 1 : (role ? 3 : 4)}: Select Root Folder</h3>
                     <p style={stepDesc}>Where does your {role === "BACKEND" ? "backend" : "frontend"} code live? (Usually root or a subfolder)</p>
                     <div style={{ border: "1px solid #eee", padding: 10, borderRadius: 8, maxHeight: 300, overflowY: "auto", marginBottom: 20, background: "#fafafa" }}>
                         {folderTree && <SimpleFolderTree tree={folderTree} onSelect={setSelectedRoot} selected={selectedRoot} />}
+                        {!folderTree && existingProject && (
+                            <div style={{ padding: 20, textAlign: "center", color: "#666" }}>
+                                Loading folder structure...
+                            </div>
+                        )}
                     </div>
                     <div style={{ display: "flex", gap: 10, alignItems: "center", background: "#e3f2fd", padding: 10, borderRadius: 6, marginBottom: 20 }}>
                         <span style={{ fontSize: "0.9em", color: "#1565c0" }}>Selected: <b>{selectedRoot}</b></span>
                     </div>
                     <div style={{ display: "flex", gap: 10 }}>
-                        <button onClick={() => setStep(3)} style={secondaryBtn}>← Back</button>
+                        {!existingProject && <button onClick={() => setStep(3)} style={secondaryBtn}>← Back</button>}
                         <button onClick={() => detectSettings(selectedRoot)} disabled={loading} style={primaryBtn}>
                             {loading ? "Detecting..." : "Next: Build Settings →"}
                         </button>
@@ -1359,7 +1425,7 @@ export default function DeploymentWizard({ onComplete, onCancel, groupId, role, 
 
             {step === 5 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step {role ? 4 : 5}: {siteType === "server" ? "Server Settings" : "Build Settings"}</h3>
+                    <h3 style={stepTitle}>Step {existingProject ? 2 : (role ? 4 : 5)}: {siteType === "server" ? "Server Settings" : "Build Settings"}</h3>
                     <p style={stepDesc}>
                         {siteType === "server"
                             ? "Select your runtime and framework to auto-configure deployment."
@@ -1998,13 +2064,10 @@ app.post('/upload', upload.single('file'), (req, res) => {
                         <button onClick={() => setStep(4)} style={secondaryBtn}>← Back</button>
                         <button
                             onClick={saveSettings}
-                            disabled={siteType === "server" ? (!selectedRuntime || !selectedFramework) : !selectedFrontendFramework}
-                            style={{
-                                ...primaryBtn,
-                                opacity: (siteType === "server" ? (!selectedRuntime || !selectedFramework) : !selectedFrontendFramework) ? 0.5 : 1
-                            }}
+                            disabled={loading}
+                            style={primaryBtn}
                         >
-                            Next: Env Vars →
+                            {loading ? "Saving..." : "Next: Environment Variables →"}
                         </button>
                     </div>
                 </div>
@@ -2012,13 +2075,10 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
             {step === 6 && (
                 <div className="fade-in">
-                    <h3 style={stepTitle}>Step {role ? 5 : 6}: Environment Variables</h3>
-                    <p style={stepDesc}>
-                        {siteType === "server"
-                            ? "Add runtime environment variables. (Note: PORT, NODE_ENV, HOST are managed automatically)"
-                            : "Add keys like VITE_API_BASE. (Build-time only)"
-                        }
-                    </p>
+                    <h3 style={stepTitle}>Step {existingProject ? 3 : (role ? 5 : 6)}: Environment Variables</h3>
+                    <p style={stepDesc}>Add secrets or config variables (e.g. API keys).</p>
+
+                    {/* Env Var UI code ... */}
 
                     {/* Error Message */}
                     {envError && (
