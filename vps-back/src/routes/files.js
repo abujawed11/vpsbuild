@@ -54,13 +54,14 @@ const storage = multer.diskStorage({
         }
     },
     filename: (req, file, cb) => {
-        // Sanitize filename and preserve extension
-        const ext = path.extname(file.originalname);
-        const basename = path.basename(file.originalname, ext)
-            .replace(/[^a-zA-Z0-9_-]/g, '_')
-            .substring(0, 100);
-        const uniqueSuffix = Date.now().toString(36);
-        cb(null, `${basename}-${uniqueSuffix}${ext}`);
+        // Preserve original filename for storage mode (so paths match database)
+        // Only sanitize dangerous characters, keep the rest intact
+        const originalName = file.originalname;
+        const sanitized = originalName
+            .replace(/\.\./g, '_')  // Prevent directory traversal
+            .replace(/[<>:"|?*]/g, '_')  // Remove invalid filesystem characters
+            .substring(0, 200);
+        cb(null, sanitized);
     }
 });
 
