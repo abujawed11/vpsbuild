@@ -405,8 +405,9 @@ async function runServerDeploy(project, deploymentId) {
 
         try {
             // Stream docker build output to logs in real-time
+            // Use --no-cache to ensure fresh code is always used (not cached COPY layers)
             await streamCommand(
-                `docker build -t ${imageTag} "${projectRoot}"`,
+                `docker build --no-cache -t ${imageTag} "${projectRoot}"`,
                 { cwd: projectRoot },
                 async (line) => {
                     // Filter out some verbose Docker messages but keep important ones
