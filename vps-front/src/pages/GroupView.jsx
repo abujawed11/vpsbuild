@@ -7,6 +7,7 @@ import EditEnvModal from "../components/EditEnvModal";
 import FileManagerModal from "../components/FileManagerModal";
 import ExecuteScriptModal from "../components/ExecuteScriptModal";
 import CreateDatabaseModal from "../components/CreateDatabaseModal";
+import LogViewerModal from "../components/LogViewerModal";
 
 const BASE_DOMAIN = import.meta.env.VITE_BASE_DOMAIN || "93.127.199.118.sslip.io";
 const BASE_PORT = import.meta.env.VITE_PORT ? `:${import.meta.env.VITE_PORT}` : "";
@@ -29,6 +30,9 @@ export default function GroupView() {
     const [managingFilesProjectId, setManagingFilesProjectId] = useState(null);
     const [managingStorage, setManagingStorage] = useState(false); // For storage mode file manager
     const [executingScriptProjectId, setExecutingScriptProjectId] = useState(null);
+    
+    // Log Viewer State
+    const [viewingLogsDeploymentId, setViewingLogsDeploymentId] = useState(null);
 
     // Messages
     const [message, setMessage] = useState(null);
@@ -126,6 +130,14 @@ export default function GroupView() {
                 method: "POST",
                 token: getToken()
             });
+            
+            // Open log viewer immediately
+            setViewingLogsDeploymentId(result.deploymentId);
+            
+            // Refresh group data to show new deployment in UI
+            fetchGroup();
+            
+            // Poll in background to update status when modal is closed
             pollDeploymentStatus(result.deploymentId, componentType);
         } catch (e) {
             showMessage("error", `Failed to start redeployment: ${e.message}`);
@@ -144,7 +156,7 @@ export default function GroupView() {
             if (pollCount >= maxPolls) {
                 clearInterval(pollInterval);
                 setRedeployingComponent(null);
-                showMessage("error", `${componentType} deployment timed out. Check logs for status.`);
+                // Don't show error if user is still viewing logs (modal handles it)
                 fetchGroup();
                 return;
             }
@@ -167,7 +179,6 @@ export default function GroupView() {
             } catch (e) {
                 clearInterval(pollInterval);
                 setRedeployingComponent(null);
-                showMessage("error", e.message);
             }
         }, 2000);
     };
@@ -270,6 +281,7 @@ export default function GroupView() {
                         onAdd={() => { setWizardRole("FRONTEND"); setShowWizard(true); }}
                         onDelete={() => deleteComponent(group.frontend?.id, "Frontend")}
                         onRedeploy={() => redeployComponent(group.frontend?.id, "Frontend")}
+                        onViewLogs={() => setViewingLogsDeploymentId(group.frontend?.latestDeployment?.id)}
                         onManageFiles={() => {
                             if (group.frontend?.id) {
                                 setManagingFilesProjectId(group.frontend.id);
@@ -291,6 +303,7 @@ export default function GroupView() {
                         onAdd={() => { setWizardRole("BACKEND"); setShowWizard(true); }}
                         onDelete={() => deleteComponent(group.backend?.id, "Backend")}
                         onRedeploy={() => redeployComponent(group.backend?.id, "Backend")}
+                        onViewLogs={() => setViewingLogsDeploymentId(group.backend?.latestDeployment?.id)}
                         onManageFiles={() => {
                             if (group.backend?.id) {
                                 setManagingFilesProjectId(group.backend.id);
@@ -319,6 +332,14 @@ export default function GroupView() {
             )}
 
             {/* Modals */}
+            {viewingLogsDeploymentId && (
+                <LogViewerModal
+                    deploymentId={viewingLogsDeploymentId}
+                    onClose={() => setViewingLogsDeploymentId(null)}
+                    onComplete={() => fetchGroup()}
+                />
+            )}
+
             {editingEnvProjectId && (() => {
                 const isFrontend = group.frontend?.id === editingEnvProjectId;
                 const componentType = isFrontend ? "Frontend" : "Backend";
@@ -386,6 +407,7 @@ function ComponentCard({
     onAdd,
     onDelete,
     onRedeploy,
+    onViewLogs,
     onManageFiles,
     onManageStorage,
     onEditEnv,
@@ -446,7 +468,8 @@ function ComponentCard({
             background: "white",
             position: "relative"
         }}>
-            {/* Loading overlay */}
+            {/* Loading overlay - only if NOT viewing logs (because modal covers it) */}
+            {/* Actually we can keep it, it's fine */}
             {(isDeleting || isRedeploying) && (
                 <div style={{
                     position: "absolute",
@@ -469,6 +492,24 @@ function ComponentCard({
                     }}>
                         {isDeleting ? "Deleting..." : "Redeploying..."}
                     </span>
+                    {/* Add View Logs button here if redeploying */}
+                    {isRedeploying && onViewLogs && component?.latestDeployment && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onViewLogs(); }}
+                            style={{
+                                marginTop: 10,
+                                background: "#e3f2fd",
+                                color: "#1565c0",
+                                border: "none",
+                                padding: "6px 12px",
+                                borderRadius: 4,
+                                fontSize: "0.85em",
+                                cursor: "pointer"
+                            }}
+                        >
+                            View Logs
+                        </button>
+                    )}
                 </div>
             )}
 
@@ -500,6 +541,9 @@ function ComponentCard({
                                 <MenuButton onClick={() => { setMenuOpen(false); onManageStorage(); }} color="#4CAF50">💾 Manage Storage</MenuButton>
                             )}
                             <MenuButton onClick={() => { setMenuOpen(false); onEditEnv(); }}>⚙️ Environment</MenuButton>
+                            {component?.latestDeployment && (
+                                <MenuButton onClick={() => { setMenuOpen(false); onViewLogs(); }}>📜 View Logs</MenuButton>
+                            )}
                             <MenuButton onClick={() => { setMenuOpen(false); onRedeploy(); }} color="#2196F3">🚀 Redeploy</MenuButton>
                             {showExecuteScript && (
                                 <MenuButton onClick={() => { setMenuOpen(false); onExecuteScript(); }}>▶️ Execute Script</MenuButton>
@@ -511,17 +555,30 @@ function ComponentCard({
             </div>
 
             {/* Status */}
-            <div style={{
-                display: "inline-block",
-                padding: "4px 12px",
-                borderRadius: 20,
-                background: status.bg,
-                color: status.color,
-                fontSize: "0.85em",
-                fontWeight: 500,
-                marginBottom: 15
-            }}>
-                {status.text}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 15 }}>
+                <div style={{
+                    display: "inline-block",
+                    padding: "4px 12px",
+                    borderRadius: 20,
+                    background: status.bg,
+                    color: status.color,
+                    fontSize: "0.85em",
+                    fontWeight: 500
+                }}>
+                    {status.text}
+                </div>
+                
+                {component?.deploymentStatus === "FAILED" && (
+                    <button 
+                        onClick={onRedeploy}
+                        style={{
+                            background: "#c62828", color: "white", border: "none",
+                            padding: "4px 12px", borderRadius: 20, fontSize: "0.8em", cursor: "pointer", fontWeight: 500
+                        }}
+                    >
+                        ↻ Retry
+                    </button>
+                )}
             </div>
 
             {/* Info */}
