@@ -217,10 +217,12 @@ export default function EditEnvModal({ projectId, projectName, onClose, onSucces
     };
 
     const handleApply = async () => {
-        // Validate
-        const validVars = envVars.filter(v => v.key.trim() && v.value.trim());
-        if (validVars.length === 0 && envVars.length > 0) {
-            setError("Please fill in all key-value pairs or remove empty ones");
+        // Validate - only require key to be present (empty values are allowed, e.g., VITE_API_BASE_URL="")
+        const validVars = envVars.filter(v => v.key.trim());
+        const invalidVars = envVars.filter(v => !v.key.trim() && v.value.trim());
+
+        if (invalidVars.length > 0) {
+            setError("Some variables have values but no keys. Please add keys or remove them.");
             return;
         }
 
