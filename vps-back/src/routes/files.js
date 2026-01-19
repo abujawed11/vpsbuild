@@ -8,6 +8,9 @@ const multer = require("multer");
 
 const router = express.Router();
 
+// Static sites path - defined at module level for use in all routes
+const staticSitesPath = process.env.STATIC_SITES_PATH || '/srv/static-sites';
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
     destination: async (req, file, cb) => {
@@ -32,7 +35,7 @@ const storage = multer.diskStorage({
             });
 
             // Validate folder
-            const isAllowed = allowedFolders.some(root => 
+            const isAllowed = allowedFolders.some(root =>
                 (folder === root) || (folder.startsWith(root + '/') && !folder.includes('..'))
             );
 
@@ -40,7 +43,6 @@ const storage = multer.diskStorage({
                 return cb(new Error(`Invalid folder. Must start with one of: ${allowedFolders.join(', ')}`));
             }
 
-            const staticSitesPath = process.env.STATIC_SITES_PATH || '/srv/static-sites';
             const uploadPath = path.join(staticSitesPath, group.slug, folder);
 
             // Ensure directory exists
@@ -186,6 +188,15 @@ router.get("/:groupId", authRequired, async (req, res) => {
         const entries = await fs.readdir(folderPath, { withFileTypes: true });
         const baseDomain = process.env.BASE_DOMAIN || '93.127.199.118.sslip.io';
 
+        // List both folders and files
+        const folders = entries
+            .filter(entry => entry.isDirectory())
+            .map(entry => ({
+                filename: entry.name,
+                type: 'folder',
+                path: `${folder}/${entry.name}`
+            }));
+
         const files = await Promise.all(
             entries
                 .filter(entry => entry.isFile())
@@ -217,13 +228,16 @@ router.get("/:groupId", authRequired, async (req, res) => {
                 })
         );
 
-        // Sort by modified date (newest first)
+        // Sort files by modified date (newest first)
         files.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+
+        // Combine folders (first) and files
+        const allItems = [...folders, ...files];
 
         res.json({
             folder,
-            files,
-            count: files.length,
+            files: allItems,
+            count: allItems.length,
             projectUrl: `https://${group.slug}.${baseDomain}`
         });
     } catch (err) {
@@ -266,7 +280,6 @@ router.delete("/:groupId/:filename", authRequired, async (req, res) => {
             return res.status(400).json({ error: "Invalid filename" });
         }
 
-        const staticSitesPath = process.env.STATIC_SITES_PATH || '/srv/static-sites';
         const filePath = path.join(staticSitesPath, group.slug, folder, sanitizedFilename);
 
         // Check if file exists
@@ -283,6 +296,64 @@ router.delete("/:groupId/:filename", authRequired, async (req, res) => {
     } catch (err) {
         console.error('Delete file error:', err);
         res.status(500).json({ error: "Failed to delete file" });
+    }
+});
+
+// POST /api/files/:groupId/mkdir - Create a folder
+router.post("/:groupId/mkdir", authRequired, async (req, res) => {
+    const { groupId } = req.params;
+    const { folder, name } = req.body;
+
+    if (!folder || !name) {
+        return res.status(400).json({ error: "folder and name are required" });
+    }
+
+    // Sanitize folder name
+    const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 100);
+    if (!sanitizedName) {
+        return res.status(400).json({ error: "Invalid folder name" });
+    }
+
+    try {
+        const group = await verifyGroupOwnership(groupId, req.user.id);
+        if (!group) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        // Get allowed folders from projects
+        const allowedFolders = ['uploads', 'media'];
+        if (group.projects) {
+            group.projects.forEach(p => {
+                if (p.staticFolder) allowedFolders.push(p.staticFolder);
+            });
+        }
+
+        // Validate parent folder
+        const isAllowed = allowedFolders.some(root =>
+            (folder === root) || (folder.startsWith(root + '/') && !folder.includes('..'))
+        );
+
+        if (!isAllowed) {
+            return res.status(400).json({ error: `Invalid folder. Must start with one of: ${allowedFolders.join(', ')}` });
+        }
+
+        const newFolderPath = path.join(staticSitesPath, group.slug, folder, sanitizedName);
+
+        // Check if folder already exists
+        if (fsSync.existsSync(newFolderPath)) {
+            return res.status(400).json({ error: "Folder already exists" });
+        }
+
+        await fs.mkdir(newFolderPath, { recursive: true });
+
+        res.json({
+            success: true,
+            message: `Folder ${sanitizedName} created`,
+            path: `${folder}/${sanitizedName}`
+        });
+    } catch (err) {
+        console.error('Create folder error:', err);
+        res.status(500).json({ error: "Failed to create folder" });
     }
 });
 

@@ -27,6 +27,7 @@ export default function GroupView() {
     const [redeployingComponent, setRedeployingComponent] = useState(null);
     const [editingEnvProjectId, setEditingEnvProjectId] = useState(null);
     const [managingFilesProjectId, setManagingFilesProjectId] = useState(null);
+    const [managingStorage, setManagingStorage] = useState(false); // For storage mode file manager
     const [executingScriptProjectId, setExecutingScriptProjectId] = useState(null);
 
     // Messages
@@ -295,6 +296,8 @@ export default function GroupView() {
                                 setManagingFilesProjectId(group.backend.id);
                             }
                         }}
+                        onManageStorage={() => setManagingStorage(true)}
+                        showManageStorage={!!group.backend?.staticFolder}
                         onEditEnv={() => setEditingEnvProjectId(group.backend?.id)}
                         onExecuteScript={() => setExecutingScriptProjectId(group.backend?.id)}
                         showExecuteScript
@@ -349,6 +352,18 @@ export default function GroupView() {
                 );
             })()}
 
+            {/* Storage File Manager - for persistent storage that survives redeployments */}
+            {managingStorage && group.backend?.staticFolder && (
+                <FileManagerModal
+                    key="storage-manager"
+                    storageMode={true}
+                    groupId={groupId}
+                    storageFolder={group.backend.staticFolder}
+                    projectName="Backend Storage"
+                    onClose={() => setManagingStorage(false)}
+                />
+            )}
+
             {executingScriptProjectId && (
                 <ExecuteScriptModal
                     projectId={executingScriptProjectId}
@@ -372,9 +387,11 @@ function ComponentCard({
     onDelete,
     onRedeploy,
     onManageFiles,
+    onManageStorage,
     onEditEnv,
     onExecuteScript,
     showExecuteScript,
+    showManageStorage,
     url,
     urlText
 }) {
@@ -479,6 +496,9 @@ function ComponentCard({
                             zIndex: 100
                         }}>
                             <MenuButton onClick={() => { setMenuOpen(false); onManageFiles(); }}>📂 Manage Files</MenuButton>
+                            {showManageStorage && (
+                                <MenuButton onClick={() => { setMenuOpen(false); onManageStorage(); }} color="#4CAF50">💾 Manage Storage</MenuButton>
+                            )}
                             <MenuButton onClick={() => { setMenuOpen(false); onEditEnv(); }}>⚙️ Environment</MenuButton>
                             <MenuButton onClick={() => { setMenuOpen(false); onRedeploy(); }} color="#2196F3">🚀 Redeploy</MenuButton>
                             {showExecuteScript && (

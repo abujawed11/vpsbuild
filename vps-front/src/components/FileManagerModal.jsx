@@ -2,15 +2,37 @@ import { useEffect, useState, useRef } from "react";
 import { apiFetch } from "../lib/api";
 import { getToken } from "../lib/auth";
 
-export default function FileManagerModal({ projectId, projectName, initialPath = "", onClose }) {
-    const [currentPath, setCurrentPath] = useState(initialPath);
+/**
+ * FileManagerModal - Manages files in two modes:
+ * 1. Workspace mode (default): Browse/upload to project workspace (/workspaces/{projectId})
+ * 2. Storage mode: Browse/upload to persistent storage (/srv/static-sites/{groupSlug}/{folder})
+ *
+ * Props:
+ * - projectId: Required for workspace mode
+ * - projectName: Display name
+ * - initialPath: Starting path
+ * - storageMode: If true, use storage API instead of workspace API
+ * - groupId: Required for storage mode - the project group ID
+ * - storageFolder: Required for storage mode - the staticFolder name (e.g., "static")
+ * - onClose: Callback when modal closes
+ */
+export default function FileManagerModal({
+    projectId,
+    projectName,
+    initialPath = "",
+    storageMode = false,
+    groupId,
+    storageFolder,
+    onClose
+}) {
+    const [currentPath, setCurrentPath] = useState(storageMode ? storageFolder : initialPath);
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [navigating, setNavigating] = useState(false); // Separate state for folder navigation
     const [error, setError] = useState("");
     const [successMessage, setSuccessMessage] = useState("");
     const [uploading, setUploading] = useState(false);
-    const [expandedFolders, setExpandedFolders] = useState(new Set([initialPath]));
+    const [expandedFolders, setExpandedFolders] = useState(new Set([storageMode ? storageFolder : initialPath]));
     const [showNewFolderInput, setShowNewFolderInput] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
     const [creatingFolder, setCreatingFolder] = useState(false);
@@ -25,7 +47,7 @@ export default function FileManagerModal({ projectId, projectName, initialPath =
 
     useEffect(() => {
         fetchFiles(currentPath, items.length === 0); // Only show full loading on initial load
-    }, [projectId, currentPath]);
+    }, [projectId, groupId, currentPath, storageMode]);
 
     const fetchFiles = async (path, isInitialLoad = false) => {
         try {
@@ -35,11 +57,30 @@ export default function FileManagerModal({ projectId, projectName, initialPath =
                 setNavigating(true); // Use navigating for folder clicks - no layout shift
             }
             setError("");
-            const data = await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(path)}`, {
-                token: getToken()
-            });
-            setItems(data.items || []);
-            setCurrentPath(data.currentPath || "/");
+
+            let data;
+            if (storageMode) {
+                // Storage mode: Use /api/files/:groupId API for persistent storage
+                data = await apiFetch(`/files/${groupId}?folder=${encodeURIComponent(path)}`, {
+                    token: getToken()
+                });
+                // Transform response to match workspace format
+                const items = (data.files || []).map(f => ({
+                    name: f.filename,
+                    path: f.type === 'folder' ? f.path : `${path}/${f.filename}`,
+                    type: f.type === 'folder' ? 'folder' : 'file',
+                    size: f.sizeBytes || 0
+                }));
+                setItems(items);
+                setCurrentPath(path);
+            } else {
+                // Workspace mode: Use /api/projects/:id/files API
+                data = await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(path)}`, {
+                    token: getToken()
+                });
+                setItems(data.items || []);
+                setCurrentPath(data.currentPath || "/");
+            }
         } catch (e) {
             setError(e.message);
         } finally {
@@ -81,16 +122,19 @@ export default function FileManagerModal({ projectId, projectName, initialPath =
 
         try {
             const apiBase = import.meta.env.VITE_API_BASE || "http://localhost:3000/api";
-            const result = await fetch(
-                `${apiBase}/projects/${projectId}/files/upload?path=${encodeURIComponent(currentPath)}`,
-                {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${getToken()}`
-                    },
-                    body: formData
-                }
-            );
+
+            // Use different endpoints based on mode
+            const uploadUrl = storageMode
+                ? `${apiBase}/files/${groupId}/upload?folder=${encodeURIComponent(currentPath)}`
+                : `${apiBase}/projects/${projectId}/files/upload?path=${encodeURIComponent(currentPath)}`;
+
+            const result = await fetch(uploadUrl, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${getToken()}`
+                },
+                body: formData
+            });
 
             if (!result.ok) {
                 const errData = await result.json();
@@ -116,14 +160,27 @@ export default function FileManagerModal({ projectId, projectName, initialPath =
         setError("");
 
         try {
-            await apiFetch(`/projects/${projectId}/files/mkdir`, {
-                method: "POST",
-                token: getToken(),
-                body: {
-                    path: currentPath,
-                    name: newFolderName.trim()
-                }
-            });
+            if (storageMode) {
+                // Storage mode: Use /api/files/:groupId/mkdir API
+                await apiFetch(`/files/${groupId}/mkdir`, {
+                    method: "POST",
+                    token: getToken(),
+                    body: {
+                        folder: currentPath,
+                        name: newFolderName.trim()
+                    }
+                });
+            } else {
+                // Workspace mode
+                await apiFetch(`/projects/${projectId}/files/mkdir`, {
+                    method: "POST",
+                    token: getToken(),
+                    body: {
+                        path: currentPath,
+                        name: newFolderName.trim()
+                    }
+                });
+            }
 
             setSuccessMessage("Folder created successfully!");
             setTimeout(() => setSuccessMessage(""), 3000);
@@ -149,10 +206,20 @@ export default function FileManagerModal({ projectId, projectName, initialPath =
 
         try {
             setError("");
-            await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(item.path)}`, {
-                method: "DELETE",
-                token: getToken()
-            });
+
+            if (storageMode) {
+                // Storage mode: Use /api/files/:groupId/:filename API
+                await apiFetch(`/files/${groupId}/${encodeURIComponent(item.name)}?folder=${encodeURIComponent(currentPath)}`, {
+                    method: "DELETE",
+                    token: getToken()
+                });
+            } else {
+                // Workspace mode
+                await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(item.path)}`, {
+                    method: "DELETE",
+                    token: getToken()
+                });
+            }
 
             setSuccessMessage(`${item.type} deleted successfully!`);
             setTimeout(() => setSuccessMessage(""), 3000);
@@ -265,9 +332,13 @@ export default function FileManagerModal({ projectId, projectName, initialPath =
                     alignItems: "center"
                 }}>
                     <div>
-                        <h2 style={{ margin: 0 }}>📂 File Manager</h2>
+                        <h2 style={{ margin: 0 }}>{storageMode ? "💾 Storage Manager" : "📂 File Manager"}</h2>
                         <p style={{ margin: "5px 0 0 0", fontSize: "0.85em", color: "#666" }}>
-                            Project: <strong>{projectName}</strong>
+                            {storageMode ? (
+                                <>Persistent Storage: <strong>/{storageFolder}/</strong> <span style={{ color: "#4CAF50" }}>(survives redeployments)</span></>
+                            ) : (
+                                <>Project: <strong>{projectName}</strong></>
+                            )}
                         </p>
                     </div>
                     <button
@@ -569,7 +640,11 @@ export default function FileManagerModal({ projectId, projectName, initialPath =
                     fontSize: "0.85em",
                     color: "#666"
                 }}>
-                    💡 <strong>Tip:</strong> After adding files that aren't in git (like uploads folders), use the "Redeploy" button to rebuild your project with the new files.
+                    {storageMode ? (
+                        <>💡 <strong>Tip:</strong> Files uploaded here are stored in persistent storage and are immediately available at <code style={{ background: "#e8f5e9", padding: "2px 6px", borderRadius: 3 }}>/{storageFolder}/filename</code>. No redeployment needed!</>
+                    ) : (
+                        <>💡 <strong>Tip:</strong> After adding files that aren't in git (like uploads folders), use the "Redeploy" button to rebuild your project with the new files.</>
+                    )}
                 </div>
             </div>
         </div>
