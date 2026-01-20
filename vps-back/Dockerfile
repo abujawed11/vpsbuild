@@ -1,6 +1,6 @@
 FROM node:20-bullseye
 
-RUN apt-get update && apt-get install -y git python3 make g++
+RUN apt-get update && apt-get install -y git python3 make g++ sqlite3
 
 RUN apt-get update && apt-get install -y \
     ca-certificates curl gnupg lsb-release \

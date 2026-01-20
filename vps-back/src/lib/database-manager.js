@@ -1,6 +1,9 @@
 const { execFile } = require("child_process");
 const util = require("util");
 const crypto = require("crypto");
+const fs = require("fs").promises;
+const path = require("path");
+const os = require("os");
 
 const execFilePromise = util.promisify(execFile);
 
@@ -919,33 +922,49 @@ async function mongoAdminEval(containerName, adminUsername, adminPassword, js) {
 // ============================================
 
 /**
+ * Helper to run an operation on a temporary copy of the SQLite DB
+ * This avoids needing sqlite3 installed inside the user's container
+ */
+async function withTempSQLiteFile(containerName, filePath, callback) {
+    const tempDir = os.tmpdir();
+    const tempFile = path.join(tempDir, `sqlite-${crypto.randomBytes(6).toString('hex')}.db`);
+    
+    try {
+        // Copy file from container to host temp
+        await docker(["cp", `${containerName}:${filePath}`, tempFile], { timeout: 30000 });
+        
+        // Run callback with local path
+        return await callback(tempFile);
+    } catch (err) {
+        throw err;
+    } finally {
+        // Clean up
+        await fs.unlink(tempFile).catch(() => {});
+    }
+}
+
+/**
  * Execute a query on a SQLite database file inside a container
- * @param {string} containerName - Container name where the .db file lives
- * @param {string} filePath - Path to the .db file inside the container
- * @param {string} query - SQL query
- * @returns {Promise<object>}
+ * Uses a temp copy strategy for robustness
  */
 async function executeSQLiteQuery(containerName, filePath, query) {
   try {
     const startTime = Date.now();
+    let stdout = "";
 
-    // Execute sqlite3 inside the container
-    // Use -header -separator to get consistent output
-    const { stdout, stderr } = await docker(
-      [
-        "exec",
-        containerName,
-        "sqlite3",
-        "-header",
-        "-separator",
-        "\t",
-        filePath,
-        query
-      ],
-      { timeout: 30000 }
-    );
+    await withTempSQLiteFile(containerName, filePath, async (localDbPath) => {
+        // Run local sqlite3 against the temp file
+        const result = await execFilePromise("sqlite3", [
+            "-header",
+            "-separator",
+            "\t",
+            localDbPath,
+            query
+        ], { timeout: 30000 });
+        stdout = result.stdout;
+    });
+
     const executionTime = Date.now() - startTime;
-
     const output = String(stdout || "").trim();
 
     // Check if this is a non-SELECT query (INSERT, UPDATE, DELETE, CREATE, etc.)
@@ -1040,22 +1059,17 @@ function parseSQLiteError(rawError) {
 
 /**
  * List tables in a SQLite database
- * @param {string} containerName - Container name
- * @param {string} filePath - Path to .db file
- * @returns {Promise<Array>}
  */
 async function listSQLiteTables(containerName, filePath) {
   try {
-    const { stdout } = await docker(
-      [
-        "exec",
-        containerName,
-        "sqlite3",
-        filePath,
-        ".tables"
-      ],
-      { timeout: 10000 }
-    );
+    let stdout = "";
+    await withTempSQLiteFile(containerName, filePath, async (localDbPath) => {
+        const result = await execFilePromise("sqlite3", [
+            localDbPath,
+            ".tables"
+        ], { timeout: 10000 });
+        stdout = result.stdout;
+    });
 
     // .tables returns space-separated table names, possibly on multiple lines
     return String(stdout || "")
@@ -1069,26 +1083,20 @@ async function listSQLiteTables(containerName, filePath) {
 
 /**
  * Get SQLite table schema
- * @param {string} containerName - Container name
- * @param {string} filePath - Path to .db file
- * @param {string} tableName - Table name
- * @returns {Promise<object>}
  */
 async function getSQLiteTableSchema(containerName, filePath, tableName) {
   try {
-    const { stdout } = await docker(
-      [
-        "exec",
-        containerName,
-        "sqlite3",
-        "-header",
-        "-separator",
-        "\t",
-        filePath,
-        `PRAGMA table_info('${tableName.replace(/'/g, "''")}');`
-      ],
-      { timeout: 10000 }
-    );
+    let stdout = "";
+    await withTempSQLiteFile(containerName, filePath, async (localDbPath) => {
+        const result = await execFilePromise("sqlite3", [
+            "-header",
+            "-separator",
+            "\t",
+            localDbPath,
+            `PRAGMA table_info('${tableName.replace(/'/g, "''")}');`
+        ], { timeout: 10000 });
+        stdout = result.stdout;
+    });
 
     const lines = String(stdout || "").trim().split('\n').filter(l => l.trim());
 
@@ -1135,9 +1143,6 @@ async function checkSQLiteFileExists(containerName, filePath) {
 
 /**
  * Get SQLite database info (file size, table count)
- * @param {string} containerName - Container name
- * @param {string} filePath - Path to .db file
- * @returns {Promise<object>}
  */
 async function getSQLiteStats(containerName, filePath) {
   const stats = {
@@ -1148,7 +1153,7 @@ async function getSQLiteStats(containerName, filePath) {
   };
 
   try {
-    // Get file size
+    // Get file size (using docker exec stat is fine/fast)
     const { stdout: sizeOut } = await docker(
       ["exec", containerName, "stat", "-c", "%s", filePath],
       { timeout: 5000 }
@@ -1158,15 +1163,17 @@ async function getSQLiteStats(containerName, filePath) {
       stats.diskUsageMB = Math.round(bytes / (1024 * 1024) * 100) / 100;
     }
 
-    // Get table count
-    const { stdout: tablesOut } = await docker(
-      ["exec", containerName, "sqlite3", filePath, "SELECT COUNT(*) FROM sqlite_master WHERE type='table';"],
-      { timeout: 5000 }
-    );
-    const count = parseInt(String(tablesOut || "").trim(), 10);
-    if (!isNaN(count)) {
-      stats.tableCount = count;
-    }
+    // Get table count using local copy strategy
+    await withTempSQLiteFile(containerName, filePath, async (localDbPath) => {
+        const { stdout: tablesOut } = await execFilePromise("sqlite3", [
+            localDbPath, 
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table';"
+        ], { timeout: 5000 });
+        const count = parseInt(String(tablesOut || "").trim(), 10);
+        if (!isNaN(count)) {
+            stats.tableCount = count;
+        }
+    });
   } catch (err) {
     console.error('Failed to get SQLite stats:', err.message);
   }

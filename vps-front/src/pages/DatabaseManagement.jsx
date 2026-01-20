@@ -612,7 +612,7 @@ export default function DatabaseManagement() {
                             onExecute={executeSingleQuery}
                             onExecuteAll={executeMultipleQueries}
                             isLoading={queryLoading}
-                            dialect={database.type === "POSTGRES" ? "postgres" : "mysql"}
+                            dialect={database.type.toLowerCase()}
                         />
                     </div>
 

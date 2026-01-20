@@ -6,7 +6,9 @@ const STORAGE_KEY_HISTORY = 'vps_sql_history';
 const STORAGE_KEY_AUTOLIMIT = 'vps_sql_autolimit';
 
 function normalizeDialect(dialect) {
-    return dialect === "postgres" ? "postgres" : "mysql";
+    if (dialect === "postgres") return "postgres";
+    if (dialect === "sqlite") return "sqlite";
+    return "mysql";
 }
 
 function getStatementAtCursor(text, cursorPosition) {
@@ -68,7 +70,8 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
         const stored = localStorage.getItem(storageAutoLimitKey);
         if (stored === "true") return true;
         if (stored === "false") return false;
-        return dbDialect !== "postgres";
+        // Postgres and SQLite support standard LIMIT
+        return true; 
     });
     const [history, setHistory] = useState(() => {
         try {
@@ -257,11 +260,30 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
         },
     ];
 
+    const sqliteSnippets = [
+        {
+            label: "List tables",
+            sql: "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+        },
+        {
+            label: "Describe table (replace table_name)",
+            sql: "PRAGMA table_info('table_name');",
+        },
+        {
+            label: "List indexes",
+            sql: "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type='index';",
+        },
+        {
+            label: "Prisma migration status",
+            sql: "SELECT migration_name, started_at, finished_at, rolled_back_at, applied_steps_count, logs FROM _prisma_migrations ORDER BY started_at DESC;",
+        },
+    ];
+
     const handleExplainAnalyze = () => {
         if (!editorRef.current || !onExecute) return;
         const text = editorRef.current.getValue();
         if (!text.trim()) return;
-        const explain = `EXPLAIN (ANALYZE, BUFFERS, VERBOSE) ${text.trim().replace(/;+\s*$/, "")};`;
+        const explain = `EXPLAIN QUERY PLAN ${text.trim().replace(/;+\s*$/, "")};`;
         addToHistory(explain);
         onExecute(explain);
     };
@@ -289,6 +311,14 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
         e.target.value = ""; // Reset select
     };
 
+    const getSnippets = () => {
+        if (dbDialect === "postgres") return postgresSnippets;
+        if (dbDialect === "sqlite") return sqliteSnippets;
+        return [];
+    };
+
+    const snippets = getSnippets();
+
     return (
         <div style={{ border: "1px solid #ddd", borderRadius: 6, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             {/* Toolbar */}
@@ -309,14 +339,14 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
                     >
                         Execute All
                     </button>
-                    {dbDialect === "postgres" && (
+                    {(dbDialect === "postgres" || dbDialect === "sqlite") && (
                         <button
                             onClick={handleExplainAnalyze}
                             disabled={isLoading}
-                            title="EXPLAIN (ANALYZE, BUFFERS, VERBOSE) for the current editor content"
+                            title={dbDialect === "postgres" ? "EXPLAIN (ANALYZE, BUFFERS, VERBOSE)" : "EXPLAIN QUERY PLAN"}
                             style={{ background: "#673ab7", color: "white", border: "none", borderRadius: 4, padding: "6px 12px", cursor: "pointer", fontSize: "0.9em" }}
                         >
-                            Explain Analyze
+                            Explain
                         </button>
                     )}
                     <button 
@@ -338,7 +368,7 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
                          </select>
                     </div>
 
-                    {dbDialect === "postgres" && (
+                    {snippets.length > 0 && (
                         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.9em", color: "#666" }}>
                             <label>Snippets:</label>
                             <select
@@ -346,14 +376,14 @@ export default function SqlEditor({ defaultValue = "", onChange, onExecute, onEx
                                     if (e.target.value === "") return;
                                     const idx = Number(e.target.value);
                                     if (!Number.isFinite(idx)) return;
-                                    const snippet = postgresSnippets[idx];
+                                    const snippet = snippets[idx];
                                     if (snippet?.sql) insertSnippet(snippet.sql);
                                     e.target.value = "";
                                 }}
                                 style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #ddd", maxWidth: 180 }}
                             >
                                 <option value="">Insert...</option>
-                                {postgresSnippets.map((s, i) => (
+                                {snippets.map((s, i) => (
                                     <option key={s.label} value={i}>{s.label}</option>
                                 ))}
                             </select>
