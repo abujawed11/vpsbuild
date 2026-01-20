@@ -1212,6 +1212,185 @@ router.delete("/:id/files", authRequired, async (req, res) => {
   }
 });
 
+// GET /api/projects/:id/container/files - List files in running container
+router.get("/:id/container/files", authRequired, async (req, res) => {
+    const { id } = req.params;
+    const { path: relativePath = "." } = req.query;
+
+    try {
+        const project = await prisma.project.findUnique({ where: { id } });
+        if (!project || project.userId !== req.user.id) {
+            return res.status(404).json({ error: "Project not found" });
+        }
+
+        const containerName = project.slug;
+
+        // Check if container exists and is running
+        try {
+            const { execSync } = require("child_process");
+            const containerStatus = execSync(`docker inspect -f '{{.State.Running}}' ${containerName}`, { encoding: "utf8" }).trim();
+            if (containerStatus !== "true") {
+                return res.status(400).json({ error: "Container is not running" });
+            }
+        } catch {
+            return res.status(400).json({ error: "Container not found" });
+        }
+
+        // Sanitize path (basic check)
+        if (relativePath.includes("..")) {
+            return res.status(400).json({ error: "Invalid path" });
+        }
+
+        // Default to workdir if "."
+        const targetPath = relativePath === "." ? "." : relativePath;
+
+        // Execute ls -la inside container
+        // We use -F to identify directories easily
+        const cmd = `docker exec ${containerName} ls -laF "${targetPath}"`;
+        const { stdout } = await execPromise(cmd);
+
+        const lines = stdout.split("\n");
+        const items = [];
+
+        // Parse ls -la output
+        // Format: drwxr-xr-x 1 root root 4096 Jan 19 12:00 node_modules/
+        for (const line of lines) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 9) continue; // Skip header/invalid lines
+
+            const perms = parts[0];
+            if (perms === "total") continue;
+
+            // Extract name (handle spaces in filenames)
+            // parts[8] is the start of the name
+            let name = parts.slice(8).join(" ");
+            
+            // Skip . and ..
+            if (name === "." || name === "./" || name === ".." || name === "../") continue;
+
+            const isDir = perms.startsWith("d") || name.endsWith("/");
+            const size = parseInt(parts[4], 10);
+            
+            // Clean up name (remove trailing / from ls -F)
+            if (name.endsWith("/")) name = name.slice(0, -1);
+            // Remove asterisk from executables (ls -F)
+            if (name.endsWith("*")) name = name.slice(0, -1);
+
+            items.push({
+                name,
+                path: targetPath === "." ? name : `${targetPath}/${name}`,
+                type: isDir ? "folder" : "file",
+                size,
+                // mode: perms // optional
+            });
+        }
+
+        // Sort: folders first
+        items.sort((a, b) => {
+            if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        res.json({
+            items,
+            currentPath: targetPath,
+            containerName
+        });
+
+    } catch (err) {
+        console.error("Container ls error:", err.message);
+        res.status(500).json({ error: "Failed to list container files: " + err.message });
+    }
+});
+
+// GET /api/projects/:id/files/content - Get file content
+router.get("/:id/files/content", authRequired, async (req, res) => {
+  const { id } = req.params;
+  const { path: relativePath } = req.query;
+
+  if (!relativePath) return res.status(400).json({ error: "Path is required" });
+
+  try {
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project || project.userId !== req.user.id) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (!project.workspacePath || !fsSync.existsSync(project.workspacePath)) {
+      return res.status(400).json({ error: "Workspace not found" });
+    }
+
+    const safeRelative = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+    const fullPath = path.join(project.workspacePath, safeRelative);
+
+    if (!fullPath.startsWith(project.workspacePath)) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+
+    if (!fsSync.existsSync(fullPath)) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    // Check if text file (basic check)
+    const ext = path.extname(fullPath).toLowerCase();
+    const textExts = ['.txt', '.md', '.json', '.js', '.ts', '.jsx', '.tsx', '.css', '.html', '.env', '.py', '.yml', '.yaml', '.xml', '.ini', '.conf', '.sh', '.gitignore', '.dockerignore', 'dockerfile'];
+    
+    // Also check known text files without extensions
+    const textFiles = ['dockerfile', 'makefile', 'license', 'readme', 'changelog'];
+    
+    if (!textExts.includes(ext) && !textFiles.includes(path.basename(fullPath).toLowerCase())) {
+        return res.status(400).json({ error: "Only text files can be edited" });
+    }
+
+    const content = await fs.readFile(fullPath, 'utf8');
+    res.json({ content });
+  } catch (err) {
+    console.error("Read file error:", err);
+    res.status(500).json({ error: "Failed to read file" });
+  }
+});
+
+// PUT /api/projects/:id/files/content - Save file content
+router.put("/:id/files/content", authRequired, async (req, res) => {
+  const { id } = req.params;
+  const { path: relativePath, content } = req.body;
+
+  if (!relativePath || content === undefined) {
+    return res.status(400).json({ error: "Path and content are required" });
+  }
+
+  try {
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project || project.userId !== req.user.id) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (!project.workspacePath || !fsSync.existsSync(project.workspacePath)) {
+      return res.status(400).json({ error: "Workspace not found" });
+    }
+
+    const safeRelative = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+    const fullPath = path.join(project.workspacePath, safeRelative);
+
+    if (!fullPath.startsWith(project.workspacePath)) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+
+    // Allow creating new files if they don't exist (e.g. .env)
+    // But ensure parent dir exists
+    const parentDir = path.dirname(fullPath);
+    if (!fsSync.existsSync(parentDir)) {
+       return res.status(400).json({ error: "Parent directory does not exist" });
+    }
+
+    await fs.writeFile(fullPath, content, 'utf8');
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Write file error:", err);
+    res.status(500).json({ error: "Failed to save file" });
+  }
+});
+
 // POST /api/projects/:id/exec - Execute a command inside the project's container
 // Uses Server-Sent Events (SSE) to stream output in real-time
 router.post("/:id/exec", authRequired, async (req, res) => {

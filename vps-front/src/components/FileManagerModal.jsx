@@ -38,6 +38,11 @@ export default function FileManagerModal({
     const [creatingFolder, setCreatingFolder] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
     const [isVisible, setIsVisible] = useState(false); // For animation
+    const [editingFile, setEditingFile] = useState(null); // File being edited { name, path, content }
+    
+    // View Mode: 'workspace' | 'container' | 'storage'
+    const [viewMode, setViewMode] = useState(storageMode ? "storage" : "workspace");
+    
     const fileInputRef = useRef(null);
 
     // Animate in on mount
@@ -46,43 +51,61 @@ export default function FileManagerModal({
     }, []);
 
     useEffect(() => {
-        fetchFiles(currentPath, items.length === 0); // Only show full loading on initial load
-    }, [projectId, groupId, currentPath, storageMode]);
+        // Reset path when switching modes
+        if (viewMode === "container") setCurrentPath(".");
+        else if (viewMode === "workspace") setCurrentPath(initialPath || "");
+        else if (viewMode === "storage") setCurrentPath(storageFolder);
+    }, [viewMode, initialPath, storageFolder]);
+
+    useEffect(() => {
+        fetchFiles(currentPath, items.length === 0);
+    }, [projectId, groupId, currentPath, viewMode]);
 
     const fetchFiles = async (path, isInitialLoad = false) => {
         try {
             if (isInitialLoad) {
                 setLoading(true);
             } else {
-                setNavigating(true); // Use navigating for folder clicks - no layout shift
+                setNavigating(true);
             }
             setError("");
 
             let data;
-            if (storageMode) {
-                // Storage mode: Use /api/files/:groupId API for persistent storage
-                data = await apiFetch(`/files/${groupId}?folder=${encodeURIComponent(path)}`, {
-                    token: getToken()
-                });
-                // Transform response to match workspace format
+            if (viewMode === "storage") {
+                // Storage mode
+                data = await apiFetch(`/files/${groupId}?folder=${encodeURIComponent(path)}`, { token: getToken() });
                 const items = (data.files || []).map(f => ({
                     name: f.filename,
                     path: f.type === 'folder' ? f.path : `${path}/${f.filename}`,
                     type: f.type === 'folder' ? 'folder' : 'file',
-                    size: f.sizeBytes || 0
+                    size: f.sizeBytes || 0,
+                    isEditable: ['.txt', '.md', '.json', '.js', '.ts', '.css', '.html', '.env', '.py', '.yml', '.yaml', '.xml', '.ini', '.conf', '.sh'].some(ext => f.filename.toLowerCase().endsWith(ext))
                 }));
                 setItems(items);
                 setCurrentPath(path);
+            } else if (viewMode === "container") {
+                // Container mode
+                data = await apiFetch(`/projects/${projectId}/container/files?path=${encodeURIComponent(path)}`, { token: getToken() });
+                // Container files are read-only for now
+                const items = (data.items || []).map(item => ({
+                    ...item,
+                    isEditable: false // Read-only
+                }));
+                setItems(items);
+                setCurrentPath(data.currentPath || ".");
             } else {
-                // Workspace mode: Use /api/projects/:id/files API
-                data = await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(path)}`, {
-                    token: getToken()
-                });
-                setItems(data.items || []);
+                // Workspace mode
+                data = await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(path)}`, { token: getToken() });
+                const items = (data.items || []).map(item => ({
+                    ...item,
+                    isEditable: item.type === 'file' && ['.txt', '.md', '.json', '.js', '.ts', '.css', '.html', '.env', '.py', '.yml', '.yaml', '.xml', '.ini', '.conf', '.sh'].some(ext => item.name.toLowerCase().endsWith(ext))
+                }));
+                setItems(items);
                 setCurrentPath(data.currentPath || "/");
             }
         } catch (e) {
             setError(e.message);
+            setItems([]); // Clear items on error
         } finally {
             setLoading(false);
             setNavigating(false);
@@ -332,15 +355,50 @@ export default function FileManagerModal({
                     alignItems: "center"
                 }}>
                     <div>
-                        <h2 style={{ margin: 0 }}>{storageMode ? "💾 Storage Manager" : "📂 File Manager"}</h2>
+                        <h2 style={{ margin: 0 }}>
+                            {viewMode === "storage" ? "💾 Storage Manager" :
+                             viewMode === "container" ? "🐳 Live Container Browser" :
+                             "📂 Source Code Manager"}
+                        </h2>
                         <p style={{ margin: "5px 0 0 0", fontSize: "0.85em", color: "#666" }}>
-                            {storageMode ? (
+                            {viewMode === "storage" ? (
                                 <>Persistent Storage: <strong>/{storageFolder}/</strong> <span style={{ color: "#4CAF50" }}>(survives redeployments)</span></>
+                            ) : viewMode === "container" ? (
+                                <>Browsing live filesystem of running container (Read-Only)</>
                             ) : (
-                                <>Project: <strong>{projectName}</strong></>
+                                <>Project: <strong>{projectName}</strong> (Workspace)</>
                             )}
                         </p>
                     </div>
+                    
+                    {/* View Switcher (only if not in storage mode) */}
+                    {!storageMode && (
+                        <div style={{ display: "flex", background: "#f5f5f5", padding: 4, borderRadius: 8, marginRight: 20 }}>
+                            <button
+                                onClick={() => setViewMode("workspace")}
+                                style={{
+                                    padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: "0.9em", fontWeight: 500,
+                                    background: viewMode === "workspace" ? "white" : "transparent",
+                                    boxShadow: viewMode === "workspace" ? "0 2px 5px rgba(0,0,0,0.1)" : "none",
+                                    color: viewMode === "workspace" ? "#333" : "#666"
+                                }}
+                            >
+                                Source Code
+                            </button>
+                            <button
+                                onClick={() => setViewMode("container")}
+                                style={{
+                                    padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: "0.9em", fontWeight: 500,
+                                    background: viewMode === "container" ? "white" : "transparent",
+                                    boxShadow: viewMode === "container" ? "0 2px 5px rgba(0,0,0,0.1)" : "none",
+                                    color: viewMode === "container" ? "#333" : "#666"
+                                }}
+                            >
+                                Live Container
+                            </button>
+                        </div>
+                    )}
+
                     <button
                         onClick={handleClose}
                         style={{
@@ -378,36 +436,27 @@ export default function FileManagerModal({
                     gap: 10,
                     alignItems: "center"
                 }}>
-                    <button
-                        onClick={handleUploadClick}
-                        disabled={uploading}
-                        style={{
-                            background: "#2196F3",
-                            color: "white",
-                            border: "none",
-                            padding: "8px 16px",
-                            borderRadius: 6,
-                            cursor: uploading ? "not-allowed" : "pointer",
-                            fontSize: "0.9em",
-                            opacity: uploading ? 0.7 : 1
-                        }}
-                    >
-                        {uploading ? "Uploading..." : "📤 Upload Files"}
-                    </button>
-                    <button
-                        onClick={() => setShowNewFolderInput(!showNewFolderInput)}
-                        style={{
-                            background: "#4CAF50",
-                            color: "white",
-                            border: "none",
-                            padding: "8px 16px",
-                            borderRadius: 6,
-                            cursor: "pointer",
-                            fontSize: "0.9em"
-                        }}
-                    >
-                        📁 New Folder
-                    </button>
+                    {viewMode !== "container" && (
+                        <>
+                            <button
+                                onClick={handleUploadClick}
+                                disabled={uploading}
+                                style={{
+                                    background: "#2196F3", color: "white", border: "none", padding: "8px 16px", borderRadius: 6, cursor: uploading ? "not-allowed" : "pointer", fontSize: "0.9em", opacity: uploading ? 0.7 : 1
+                                }}
+                            >
+                                {uploading ? "Uploading..." : "📤 Upload Files"}
+                            </button>
+                            <button
+                                onClick={() => setShowNewFolderInput(!showNewFolderInput)}
+                                style={{
+                                    background: "#4CAF50", color: "white", border: "none", padding: "8px 16px", borderRadius: 6, cursor: "pointer", fontSize: "0.9em"
+                                }}
+                            >
+                                📁 New Folder
+                            </button>
+                        </>
+                    )}
                     <button
                         onClick={() => fetchFiles(currentPath)}
                         disabled={loading}
