@@ -249,7 +249,26 @@ export default function FileManagerModal({
     };
 
     const handleBreadcrumbClick = (path) => {
-        setCurrentPath(path);
+        // If clicking Root (empty path) in container mode, default to "."
+        if (!path && viewMode === "container") {
+            setCurrentPath(".");
+        } else {
+            setCurrentPath(path);
+        }
+    };
+
+    const handleBack = () => {
+        if (!currentPath || currentPath === "." || currentPath === "/") return;
+        
+        // Remove last segment
+        const parts = currentPath.split("/").filter(Boolean);
+        parts.pop();
+        
+        if (parts.length === 0) {
+            setCurrentPath(viewMode === "container" ? "." : "");
+        } else {
+            setCurrentPath(parts.join("/"));
+        }
     };
 
     const formatSize = (bytes) => {
@@ -260,7 +279,7 @@ export default function FileManagerModal({
     };
 
     const renderBreadcrumbs = () => {
-        const parts = currentPath === "/" ? [] : currentPath.split("/").filter(Boolean);
+        const parts = currentPath === "/" || currentPath === "." ? [] : currentPath.split("/").filter(Boolean);
 
         return (
             <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 15, fontSize: "0.9em" }}>
@@ -270,8 +289,8 @@ export default function FileManagerModal({
                         background: "none",
                         border: "none",
                         cursor: "pointer",
-                        color: currentPath === "/" ? "#2196F3" : "#666",
-                        textDecoration: currentPath === "/" ? "underline" : "none",
+                        color: (currentPath === "/" || currentPath === "." || !currentPath) ? "#2196F3" : "#666",
+                        textDecoration: (currentPath === "/" || currentPath === "." || !currentPath) ? "underline" : "none",
                         padding: "2px 5px"
                     }}
                 >
@@ -438,6 +457,22 @@ export default function FileManagerModal({
                     gap: 10,
                     alignItems: "center"
                 }}>
+                    <button
+                        onClick={handleBack}
+                        disabled={!currentPath || currentPath === "." || currentPath === "/"}
+                        style={{
+                            background: "#f0f0f0",
+                            color: "#333",
+                            border: "none",
+                            padding: "8px 16px",
+                            borderRadius: 6,
+                            cursor: (!currentPath || currentPath === "." || currentPath === "/") ? "default" : "pointer",
+                            fontSize: "0.9em",
+                            opacity: (!currentPath || currentPath === "." || currentPath === "/") ? 0.5 : 1
+                        }}
+                    >
+                        ⬅ Back
+                    </button>
                     {viewMode !== "container" && (
                         <>
                             <button
