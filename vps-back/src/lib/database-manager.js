@@ -930,8 +930,23 @@ async function withTempSQLiteFile(containerName, filePath, callback) {
     const tempFile = path.join(tempDir, `sqlite-${crypto.randomBytes(6).toString('hex')}.db`);
     
     try {
+        // Resolve absolute path if relative
+        // We assume paths starting with / are absolute in the container
+        let absolutePath = filePath;
+        if (!filePath.startsWith('/')) {
+             try {
+                 const { stdout } = await docker(["inspect", "--format={{.Config.WorkingDir}}", containerName], { timeout: 10000 });
+                 const workDir = String(stdout || "").trim() || "/";
+                 // Join paths (simple string concat for unix paths)
+                 absolutePath = workDir.endsWith('/') ? workDir + filePath : workDir + '/' + filePath;
+             } catch (e) {
+                 // Fallback to original path if inspect fails
+                 console.warn(`Failed to inspect working dir for ${containerName}: ${e.message}`);
+             }
+        }
+
         // Copy file from container to host temp
-        await docker(["cp", `${containerName}:${filePath}`, tempFile], { timeout: 30000 });
+        await docker(["cp", `${containerName}:${absolutePath}`, tempFile], { timeout: 30000 });
         
         // Run callback with local path
         return await callback(tempFile);
