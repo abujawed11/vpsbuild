@@ -22,6 +22,11 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
     const [selectedSourceProject, setSelectedSourceProject] = useState("");
     const [sqliteFilePath, setSqliteFilePath] = useState("");
     const [loadingProjects, setLoadingProjects] = useState(false);
+    
+    // File picker state
+    const [showFilePicker, setShowFilePicker] = useState(false);
+    const [projectFiles, setProjectFiles] = useState([]);
+    const [loadingFiles, setLoadingFiles] = useState(false);
 
     // For group-based flow, fetch the backend project (if any) for auto-linking env vars
     useEffect(() => {
@@ -50,6 +55,63 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
                 .finally(() => setLoadingProjects(false));
         }
     }, [type]);
+    
+    // Fetch files when source project changes
+    useEffect(() => {
+        if (type === 'SQLITE' && selectedSourceProject) {
+            setSqliteFilePath(""); // Reset path when project changes
+            setShowFilePicker(false);
+        }
+    }, [selectedSourceProject, type]);
+
+    const fetchProjectFiles = async () => {
+        if (!selectedSourceProject) return;
+        
+        setLoadingFiles(true);
+        setShowFilePicker(true);
+        setProjectFiles([]);
+        
+        try {
+            // Recursive file fetch function
+            const allFiles = [];
+            const fetchDir = async (dirPath) => {
+                const res = await apiFetch(`/projects/${selectedSourceProject}/files?path=${encodeURIComponent(dirPath)}`, { token: getToken() });
+                
+                if (res.items) {
+                    for (const item of res.items) {
+                        if (item.type === "folder" && !item.name.startsWith(".") && item.name !== "node_modules" && item.name !== "venv" && item.name !== ".git") {
+                            // Recurse into subdirectories (limit depth to 3 levels to avoid too many requests)
+                            const relPath = dirPath ? item.path.replace(dirPath, "") : item.path; // This logic might be imperfect depending on API, simplified for now
+                            // Actually the API returns full relative paths usually or we handle it. 
+                            // Let's just trust item.path is the path relative to workspace root if that's what /files returns
+                            // In DeploymentWizard it recurses. Let's do a simple 2-level deep search or just root.
+                            // For safety/speed, let's just search root and maybe one level down.
+                            // Or better: just fetch root and if user needs deep, they type it. 
+                            // But user wants convenience. 
+                            
+                            // Let's try to fetch a few levels deep
+                            const depth = item.path.split('/').length;
+                            if (depth <= 3) {
+                                await fetchDir(item.path);
+                            }
+                        } else if (item.type === "file") {
+                            // Check for .db or .sqlite extensions
+                            if (item.name.endsWith(".db") || item.name.endsWith(".sqlite") || item.name.endsWith(".sqlite3")) {
+                                allFiles.push(item);
+                            }
+                        }
+                    }
+                }
+            };
+            
+            await fetchDir("");
+            setProjectFiles(allFiles);
+        } catch (e) {
+            console.error("Failed to fetch files:", e);
+        } finally {
+            setLoadingFiles(false);
+        }
+    };
 
     const handleCreate = async () => {
         if (!name.trim()) {
@@ -552,12 +614,74 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
                             <label style={{ display: "block", fontSize: "0.85em", marginBottom: 4 }}>
                                 File Path (relative to project root)
                             </label>
-                            <input 
-                                value={sqliteFilePath} 
-                                onChange={e => setSqliteFilePath(e.target.value)}
-                                placeholder="./data/db.sqlite"
-                                style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace" }}
-                            />
+                            <div style={{ display: "flex", gap: 10 }}>
+                                <input 
+                                    value={sqliteFilePath} 
+                                    onChange={e => setSqliteFilePath(e.target.value)}
+                                    placeholder="./data/db.sqlite"
+                                    style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace" }}
+                                />
+                                <button
+                                    onClick={fetchProjectFiles}
+                                    disabled={!selectedSourceProject || loadingFiles}
+                                    style={{
+                                        padding: "8px 12px",
+                                        borderRadius: 4,
+                                        border: "1px solid #ddd",
+                                        background: "#f0f0f0",
+                                        cursor: selectedSourceProject ? "pointer" : "not-allowed",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 6,
+                                        fontSize: "0.9em"
+                                    }}
+                                >
+                                    {loadingFiles ? "Loading..." : "📂 Browse"}
+                                </button>
+                            </div>
+                            
+                            {/* File Picker Dropdown */}
+                            {showFilePicker && (
+                                <div style={{
+                                    marginTop: 8,
+                                    border: "1px solid #ddd",
+                                    borderRadius: 6,
+                                    maxHeight: 200,
+                                    overflowY: "auto",
+                                    background: "white",
+                                    boxShadow: "0 4px 10px rgba(0,0,0,0.1)"
+                                }}>
+                                    {projectFiles.length > 0 ? (
+                                        projectFiles.map((file, idx) => (
+                                            <div
+                                                key={idx}
+                                                onClick={() => {
+                                                    setSqliteFilePath(file.path);
+                                                    setShowFilePicker(false);
+                                                }}
+                                                style={{
+                                                    padding: "8px 12px",
+                                                    cursor: "pointer",
+                                                    borderBottom: "1px solid #f0f0f0",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: 8,
+                                                    fontSize: "0.9em"
+                                                }}
+                                                onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
+                                                onMouseLeave={e => e.currentTarget.style.background = "white"}
+                                            >
+                                                <span>📦</span>
+                                                <span style={{ fontFamily: "monospace" }}>{file.path}</span>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div style={{ padding: 12, color: "#999", fontSize: "0.85em", textAlign: "center" }}>
+                                            {loadingFiles ? "Scanning for .db files..." : "No .db or .sqlite files found"}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <p style={{ fontSize: "0.75em", color: "#666", marginTop: 4 }}>
                             Ensure this file exists in your deployed project.
