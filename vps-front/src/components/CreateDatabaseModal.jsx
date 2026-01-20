@@ -27,6 +27,7 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
     const [showFilePicker, setShowFilePicker] = useState(false);
     const [projectFiles, setProjectFiles] = useState([]);
     const [loadingFiles, setLoadingFiles] = useState(false);
+    const [fileSourceMode, setFileSourceMode] = useState("container"); // "container" or "repo"
 
     // For group-based flow, fetch the backend project (if any) for auto-linking env vars
     useEffect(() => {
@@ -72,40 +73,58 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
         setProjectFiles([]);
         
         try {
-            // Recursive file fetch function
             const allFiles = [];
-            const fetchDir = async (dirPath) => {
-                const res = await apiFetch(`/projects/${selectedSourceProject}/files?path=${encodeURIComponent(dirPath)}`, { token: getToken() });
+            
+            if (fileSourceMode === "container") {
+                // Container mode: Scan root and common data directories
+                // Note: Recursive scan via docker exec is slow, so we check specific paths
+                const pathsToCheck = ["", "data", "db", "storage", "app"];
                 
-                if (res.items) {
-                    for (const item of res.items) {
-                        if (item.type === "folder" && !item.name.startsWith(".") && item.name !== "node_modules" && item.name !== "venv" && item.name !== ".git") {
-                            // Recurse into subdirectories (limit depth to 3 levels to avoid too many requests)
-                            const relPath = dirPath ? item.path.replace(dirPath, "") : item.path; // This logic might be imperfect depending on API, simplified for now
-                            // Actually the API returns full relative paths usually or we handle it. 
-                            // Let's just trust item.path is the path relative to workspace root if that's what /files returns
-                            // In DeploymentWizard it recurses. Let's do a simple 2-level deep search or just root.
-                            // For safety/speed, let's just search root and maybe one level down.
-                            // Or better: just fetch root and if user needs deep, they type it. 
-                            // But user wants convenience. 
-                            
-                            // Let's try to fetch a few levels deep
-                            const depth = item.path.split('/').length;
-                            if (depth <= 3) {
-                                await fetchDir(item.path);
+                for (const checkPath of pathsToCheck) {
+                    try {
+                        const res = await apiFetch(`/projects/${selectedSourceProject}/container/files?path=${encodeURIComponent(checkPath || ".")}`, { token: getToken() });
+                        if (res.items) {
+                            for (const item of res.items) {
+                                if (item.type === "file") {
+                                    if (item.name.endsWith(".db") || item.name.endsWith(".sqlite") || item.name.endsWith(".sqlite3")) {
+                                        // item.path is already relative to the requested path in container/files endpoint (usually)
+                                        // Wait, the endpoint returns: path: targetPath === "." ? name : `${targetPath}/${name}`
+                                        // So it's the full relative path.
+                                        allFiles.push(item);
+                                    }
+                                }
                             }
-                        } else if (item.type === "file") {
-                            // Check for .db or .sqlite extensions
-                            if (item.name.endsWith(".db") || item.name.endsWith(".sqlite") || item.name.endsWith(".sqlite3")) {
-                                allFiles.push(item);
+                        }
+                    } catch (e) {
+                        // Ignore errors for specific paths (dir might not exist)
+                    }
+                }
+            } else {
+                // Repo mode: Recursive workspace scan
+                const fetchDir = async (dirPath) => {
+                    const res = await apiFetch(`/projects/${selectedSourceProject}/files?path=${encodeURIComponent(dirPath)}`, { token: getToken() });
+                    
+                    if (res.items) {
+                        for (const item of res.items) {
+                            if (item.type === "folder" && !item.name.startsWith(".") && item.name !== "node_modules" && item.name !== "venv" && item.name !== ".git") {
+                                const depth = item.path.split('/').length;
+                                if (depth <= 3) {
+                                    await fetchDir(item.path);
+                                }
+                            } else if (item.type === "file") {
+                                if (item.name.endsWith(".db") || item.name.endsWith(".sqlite") || item.name.endsWith(".sqlite3")) {
+                                    allFiles.push(item);
+                                }
                             }
                         }
                     }
-                }
-            };
+                };
+                await fetchDir("");
+            }
             
-            await fetchDir("");
-            setProjectFiles(allFiles);
+            // Deduplicate by path
+            const uniqueFiles = Array.from(new Map(allFiles.map(item => [item.path, item])).values());
+            setProjectFiles(uniqueFiles);
         } catch (e) {
             console.error("Failed to fetch files:", e);
         } finally {
@@ -614,6 +633,41 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
                             <label style={{ display: "block", fontSize: "0.85em", marginBottom: 4 }}>
                                 File Path (relative to project root)
                             </label>
+                            
+                            {/* Source Toggle */}
+                            <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+                                <button
+                                    onClick={() => setFileSourceMode("container")}
+                                    style={{
+                                        flex: 1,
+                                        padding: "6px 12px",
+                                        borderRadius: 4,
+                                        border: fileSourceMode === "container" ? "1px solid #2196F3" : "1px solid #ddd",
+                                        background: fileSourceMode === "container" ? "#e3f2fd" : "white",
+                                        color: fileSourceMode === "container" ? "#1976d2" : "#666",
+                                        fontSize: "0.8em",
+                                        cursor: "pointer"
+                                    }}
+                                >
+                                    🐋 Live Container
+                                </button>
+                                <button
+                                    onClick={() => setFileSourceMode("repo")}
+                                    style={{
+                                        flex: 1,
+                                        padding: "6px 12px",
+                                        borderRadius: 4,
+                                        border: fileSourceMode === "repo" ? "1px solid #2196F3" : "1px solid #ddd",
+                                        background: fileSourceMode === "repo" ? "#e3f2fd" : "white",
+                                        color: fileSourceMode === "repo" ? "#1976d2" : "#666",
+                                        fontSize: "0.8em",
+                                        cursor: "pointer"
+                                    }}
+                                >
+                                    📂 Repository
+                                </button>
+                            </div>
+
                             <div style={{ display: "flex", gap: 10 }}>
                                 <input 
                                     value={sqliteFilePath} 
@@ -636,7 +690,7 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
                                         fontSize: "0.9em"
                                     }}
                                 >
-                                    {loadingFiles ? "Loading..." : "📂 Browse"}
+                                    {loadingFiles ? "Scanning..." : "📂 Browse"}
                                 </button>
                             </div>
                             
