@@ -349,6 +349,7 @@ export default function DatabaseManagement() {
             case 'MYSQL': return '🐬';
             case 'POSTGRES': return '🐘';
             case 'MONGODB': return '🍃';
+            case 'SQLITE': return '📦';
             default: return '🗄️';
         }
     };
@@ -480,32 +481,59 @@ export default function DatabaseManagement() {
                     {/* Connection Details */}
                     <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20, marginBottom: 20 }}>
                         <h3 style={{ margin: "0 0 16px 0" }}>Connection Details</h3>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            {[ 
-                                { label: "Host", value: database.host },
-                                { label: "Port", value: database.port },
-                                { label: "Database", value: database.dbName },
-                                { label: "Username", value: database.username }
-                            ].map(item => (
-                                <div key={item.label}>
-                                    <label style={{ display: "block", fontSize: "0.8em", color: "#666", marginBottom: 4 }}>{item.label}</label>
+                        {database.type === 'SQLITE' ? (
+                            <div style={{ display: "grid", gap: 12 }}>
+                                <div>
+                                    <label style={{ display: "block", fontSize: "0.8em", color: "#666", marginBottom: 4 }}>File Path</label>
                                     <div style={{ display: "flex", gap: 8 }}>
-                                        <input readOnly value={item.value} style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace", fontSize: "0.9em" }} />
-                                        <button onClick={() => copyToClipboard(String(item.value))} style={{ background: "#f0f0f0", border: "none", borderRadius: 4, padding: "0 10px", cursor: "pointer" }}>📋</button>
+                                        <input readOnly value={database.filePath || "N/A"} style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace", fontSize: "0.9em" }} />
+                                        <button onClick={() => copyToClipboard(database.filePath)} style={{ background: "#f0f0f0", border: "none", borderRadius: 4, padding: "0 10px", cursor: "pointer" }}>📋</button>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
-                        <div style={{ marginTop: 12 }}>
-                            <label style={{ display: "block", fontSize: "0.8em", color: "#666", marginBottom: 4 }}>Connection URL (password hidden)</label>
-                            <div style={{ display: "flex", gap: 8 }}>
-                                <input readOnly value={database.connectionUrl} style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace", fontSize: "0.85em" }} />
-                                <button onClick={() => copyToClipboard(database.connectionUrl)} style={{ background: "#f0f0f0", border: "none", borderRadius: 4, padding: "0 10px", cursor: "pointer" }}>📋</button>
+                                <div>
+                                    <label style={{ display: "block", fontSize: "0.8em", color: "#666", marginBottom: 4 }}>Source Project ID</label>
+                                    <div style={{ display: "flex", gap: 8 }}>
+                                        <input readOnly value={database.sourceProjectId || "Uploaded File"} style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace", fontSize: "0.9em" }} />
+                                    </div>
+                                </div>
+                                <div style={{ marginTop: 12 }}>
+                                    <label style={{ display: "block", fontSize: "0.8em", color: "#666", marginBottom: 4 }}>Connection URL</label>
+                                    <div style={{ display: "flex", gap: 8 }}>
+                                        <input readOnly value={database.connectionUrl} style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace", fontSize: "0.85em" }} />
+                                        <button onClick={() => copyToClipboard(database.connectionUrl)} style={{ background: "#f0f0f0", border: "none", borderRadius: 4, padding: "0 10px", cursor: "pointer" }}>📋</button>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <p style={{ fontSize: "0.8em", color: "#888", margin: "12px 0 0 0" }}>
-                            ⚠️ Password is hidden for security. Use "Reset Password" to get a new one.
-                        </p>
+                        ) : (
+                            <>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                    {[ 
+                                        { label: "Host", value: database.host },
+                                        { label: "Port", value: database.port },
+                                        { label: "Database", value: database.dbName },
+                                        { label: "Username", value: database.username }
+                                    ].map(item => (
+                                        <div key={item.label}>
+                                            <label style={{ display: "block", fontSize: "0.8em", color: "#666", marginBottom: 4 }}>{item.label}</label>
+                                            <div style={{ display: "flex", gap: 8 }}>
+                                                <input readOnly value={item.value} style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace", fontSize: "0.9em" }} />
+                                                <button onClick={() => copyToClipboard(String(item.value))} style={{ background: "#f0f0f0", border: "none", borderRadius: 4, padding: "0 10px", cursor: "pointer" }}>📋</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div style={{ marginTop: 12 }}>
+                                    <label style={{ display: "block", fontSize: "0.8em", color: "#666", marginBottom: 4 }}>Connection URL (password hidden)</label>
+                                    <div style={{ display: "flex", gap: 8 }}>
+                                        <input readOnly value={database.connectionUrl} style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace", fontSize: "0.85em" }} />
+                                        <button onClick={() => copyToClipboard(database.connectionUrl)} style={{ background: "#f0f0f0", border: "none", borderRadius: 4, padding: "0 10px", cursor: "pointer" }}>📋</button>
+                                    </div>
+                                </div>
+                                <p style={{ fontSize: "0.8em", color: "#888", margin: "12px 0 0 0" }}>
+                                    ⚠️ Password is hidden for security. Use "Reset Password" to get a new one.
+                                </p>
+                            </>
+                        )}
                     </div>
 
                     {/* Statistics */}
@@ -835,26 +863,28 @@ export default function DatabaseManagement() {
             {activeTab === "settings" && (
                 <div>
                     {/* Status Controls */}
-                    <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20, marginBottom: 20 }}>
-                        <h3 style={{ margin: "0 0 16px 0" }}>Status Controls</h3>
-                        <div style={{ display: "flex", gap: 10 }}>
-                            {database.status === 'RUNNING' && (
-                                <>
-                                    <button onClick={() => handleAction('stop')} disabled={actionLoading} style={{ background: "#ff9800", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
-                                        Stop Database
+                    {database.type !== 'SQLITE' && (
+                        <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20, marginBottom: 20 }}>
+                            <h3 style={{ margin: "0 0 16px 0" }}>Status Controls</h3>
+                            <div style={{ display: "flex", gap: 10 }}>
+                                {database.status === 'RUNNING' && (
+                                    <>
+                                        <button onClick={() => handleAction('stop')} disabled={actionLoading} style={{ background: "#ff9800", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
+                                            Stop Database
+                                        </button>
+                                        <button onClick={() => handleAction('restart')} disabled={actionLoading} style={{ background: "#2196F3", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
+                                            Restart Database
+                                        </button>
+                                    </>
+                                )}
+                                {database.status === 'STOPPED' && (
+                                    <button onClick={() => handleAction('start')} disabled={actionLoading} style={{ background: "#4caf50", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
+                                        Start Database
                                     </button>
-                                    <button onClick={() => handleAction('restart')} disabled={actionLoading} style={{ background: "#2196F3", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
-                                        Restart Database
-                                    </button>
-                                </>
-                            )}
-                            {database.status === 'STOPPED' && (
-                                <button onClick={() => handleAction('start')} disabled={actionLoading} style={{ background: "#4caf50", color: "white", border: "none", borderRadius: 6, padding: "10px 20px", cursor: "pointer" }}>
-                                    Start Database
-                                </button>
-                            )}
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* Security */}
                     <div style={{ background: "#f9f9f9", borderRadius: 8, padding: 20, marginBottom: 20 }}>

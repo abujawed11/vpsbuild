@@ -914,6 +914,266 @@ async function mongoAdminEval(containerName, adminUsername, adminPassword, js) {
   );
 }
 
+// ============================================
+// SQLite Support Functions
+// ============================================
+
+/**
+ * Execute a query on a SQLite database file inside a container
+ * @param {string} containerName - Container name where the .db file lives
+ * @param {string} filePath - Path to the .db file inside the container
+ * @param {string} query - SQL query
+ * @returns {Promise<object>}
+ */
+async function executeSQLiteQuery(containerName, filePath, query) {
+  try {
+    const startTime = Date.now();
+
+    // Execute sqlite3 inside the container
+    // Use -header -separator to get consistent output
+    const { stdout, stderr } = await docker(
+      [
+        "exec",
+        containerName,
+        "sqlite3",
+        "-header",
+        "-separator",
+        "\t",
+        filePath,
+        query
+      ],
+      { timeout: 30000 }
+    );
+    const executionTime = Date.now() - startTime;
+
+    const output = String(stdout || "").trim();
+
+    // Check if this is a non-SELECT query (INSERT, UPDATE, DELETE, CREATE, etc.)
+    const isSelectQuery = /^\s*(SELECT|PRAGMA|WITH)\b/i.test(query);
+
+    if (!isSelectQuery) {
+      return {
+        success: true,
+        results: [],
+        fields: [],
+        rowCount: 0,
+        executionTime,
+        message: output || "Query executed successfully"
+      };
+    }
+
+    if (!output) {
+      return {
+        success: true,
+        results: [],
+        fields: [],
+        rowCount: 0,
+        executionTime
+      };
+    }
+
+    // Parse tabular output
+    const lines = output.split('\n').filter(l => l.trim());
+
+    if (lines.length === 0) {
+      return {
+        success: true,
+        results: [],
+        fields: [],
+        rowCount: 0,
+        executionTime
+      };
+    }
+
+    // First line is headers
+    const headers = lines[0].split('\t');
+    const fields = headers.map(name => ({ name, type: 'unknown' }));
+
+    // Rest are data rows
+    const results = lines.slice(1).map(line => {
+      const values = line.split('\t');
+      const row = {};
+      headers.forEach((header, idx) => {
+        row[header] = values[idx] === '' ? null : values[idx];
+      });
+      return row;
+    });
+
+    return {
+      success: true,
+      results,
+      fields,
+      rowCount: results.length,
+      executionTime
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: parseSQLiteError(err.message),
+      sqlState: null
+    };
+  }
+}
+
+/**
+ * Parse SQLite error message
+ * @param {string} rawError - Raw error
+ * @returns {string} - Clean error
+ */
+function parseSQLiteError(rawError) {
+  if (!rawError) return "Unknown error";
+
+  // SQLite errors often contain "Error:" prefix
+  const match = rawError.match(/Error:\s*(.+?)(\n|$)/i);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+
+  // Check for "near" syntax errors
+  const nearMatch = rawError.match(/near\s+"[^"]+":.*$/im);
+  if (nearMatch) {
+    return nearMatch[0];
+  }
+
+  return rawError;
+}
+
+/**
+ * List tables in a SQLite database
+ * @param {string} containerName - Container name
+ * @param {string} filePath - Path to .db file
+ * @returns {Promise<Array>}
+ */
+async function listSQLiteTables(containerName, filePath) {
+  try {
+    const { stdout } = await docker(
+      [
+        "exec",
+        containerName,
+        "sqlite3",
+        filePath,
+        ".tables"
+      ],
+      { timeout: 10000 }
+    );
+
+    // .tables returns space-separated table names, possibly on multiple lines
+    return String(stdout || "")
+      .trim()
+      .split(/\s+/)
+      .filter(t => t.trim());
+  } catch (err) {
+    throw new Error(`Failed to list SQLite tables: ${err.message}`);
+  }
+}
+
+/**
+ * Get SQLite table schema
+ * @param {string} containerName - Container name
+ * @param {string} filePath - Path to .db file
+ * @param {string} tableName - Table name
+ * @returns {Promise<object>}
+ */
+async function getSQLiteTableSchema(containerName, filePath, tableName) {
+  try {
+    const { stdout } = await docker(
+      [
+        "exec",
+        containerName,
+        "sqlite3",
+        "-header",
+        "-separator",
+        "\t",
+        filePath,
+        `PRAGMA table_info('${tableName.replace(/'/g, "''")}');`
+      ],
+      { timeout: 10000 }
+    );
+
+    const lines = String(stdout || "").trim().split('\n').filter(l => l.trim());
+
+    if (lines.length <= 1) {
+      return { columns: [] };
+    }
+
+    // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+    const dataLines = lines.slice(1); // Skip header
+    const columns = dataLines.map(line => {
+      const parts = line.split('\t');
+      return {
+        name: parts[1] || '',
+        type: parts[2] || '',
+        nullable: parts[3] !== '1',
+        default: parts[4] || null,
+        key: parts[5] === '1' ? 'PRI' : null
+      };
+    });
+
+    return { columns };
+  } catch (err) {
+    throw new Error(`Failed to get SQLite table schema: ${err.message}`);
+  }
+}
+
+/**
+ * Check if a SQLite file exists in a container
+ * @param {string} containerName - Container name
+ * @param {string} filePath - Path to check
+ * @returns {Promise<boolean>}
+ */
+async function checkSQLiteFileExists(containerName, filePath) {
+  try {
+    await docker(
+      ["exec", containerName, "test", "-f", filePath],
+      { timeout: 5000 }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get SQLite database info (file size, table count)
+ * @param {string} containerName - Container name
+ * @param {string} filePath - Path to .db file
+ * @returns {Promise<object>}
+ */
+async function getSQLiteStats(containerName, filePath) {
+  const stats = {
+    diskUsageMB: 0,
+    tableCount: 0,
+    uptime: 0, // Not applicable for SQLite
+    connections: 0 // Not applicable for SQLite
+  };
+
+  try {
+    // Get file size
+    const { stdout: sizeOut } = await docker(
+      ["exec", containerName, "stat", "-c", "%s", filePath],
+      { timeout: 5000 }
+    );
+    const bytes = parseInt(String(sizeOut || "").trim(), 10);
+    if (!isNaN(bytes)) {
+      stats.diskUsageMB = Math.round(bytes / (1024 * 1024) * 100) / 100;
+    }
+
+    // Get table count
+    const { stdout: tablesOut } = await docker(
+      ["exec", containerName, "sqlite3", filePath, "SELECT COUNT(*) FROM sqlite_master WHERE type='table';"],
+      { timeout: 5000 }
+    );
+    const count = parseInt(String(tablesOut || "").trim(), 10);
+    if (!isNaN(count)) {
+      stats.tableCount = count;
+    }
+  } catch (err) {
+    console.error('Failed to get SQLite stats:', err.message);
+  }
+
+  return stats;
+}
+
 module.exports = {
     generatePassword,
     generateShortId,
@@ -936,6 +1196,12 @@ module.exports = {
     mysqlAdminExec,
     postgresAdminExec,
     mongoAdminEval,
+    // SQLite functions
+    executeSQLiteQuery,
+    listSQLiteTables,
+    getSQLiteTableSchema,
+    checkSQLiteFileExists,
+    getSQLiteStats,
     DB_PORTS,
     DB_IMAGES,
     ADMIN_USERS,

@@ -21,6 +21,12 @@ const {
     getTableSchema,
     postgresAdminExec,
     mongoAdminEval,
+    // SQLite functions
+    executeSQLiteQuery,
+    listSQLiteTables,
+    getSQLiteTableSchema,
+    checkSQLiteFileExists,
+    getSQLiteStats,
     ADMIN_USERS,
     DB_PORTS
 } = require("../lib/database-manager");
@@ -43,6 +49,10 @@ function getEnvKeysForType(type) {
 }
 
 function maskedConnectionUrlForDatabase(db) {
+    // SQLite doesn't have a traditional connection URL
+    if (db.type === 'SQLITE') {
+        return db.filePath ? `sqlite://${db.filePath}` : null;
+    }
     return maskConnectionUrl(
         generateConnectionUrl(db.type, {
             username: db.dbUsername,
@@ -123,7 +133,7 @@ async function resolveAdminAuth(database) {
 }
 
 function sanitizeDatabase(db, { includeProvisioning = false } = {}) {
-    return {
+    const base = {
         id: db.id,
         userId: db.userId,
         groupId: db.groupId || null,  // Project group link
@@ -148,12 +158,148 @@ function sanitizeDatabase(db, { includeProvisioning = false } = {}) {
         provisioningLog: includeProvisioning ? (db.provisioningLog || null) : undefined,
         connectionUrl: maskedConnectionUrlForDatabase(db),
     };
+
+    // Add SQLite-specific fields
+    if (db.type === 'SQLITE') {
+        base.filePath = db.filePath || null;
+        base.sourceProjectId = db.sourceProjectId || null;
+        base.uploadedFileName = db.uploadedFileName || null;
+    }
+
+    return base;
 }
 
 async function persistProvisioning(databaseId, provisioningLog, { lastError = null, lastProvisionLog = null, status = null } = {}) {
     const data = { provisioningLog, lastError, lastProvisionLog };
     if (status) data.status = status;
     await prisma.database.update({ where: { id: databaseId }, data }).catch(() => {});
+}
+
+// ============================================
+// SQLite Creation Helper
+// ============================================
+
+async function createSQLiteDatabase(req, res, { name, sourceProjectId, filePath, uploadedFileName, groupId }) {
+    try {
+        // Validate: Either sourceProjectId+filePath OR uploadedFileName must be provided
+        if (!sourceProjectId && !uploadedFileName) {
+            return res.status(400).json({
+                error: "SQLite requires either a source project with file path, or an uploaded file"
+            });
+        }
+
+        if (sourceProjectId && !filePath) {
+            return res.status(400).json({
+                error: "File path is required when selecting from a project"
+            });
+        }
+
+        // If sourceProjectId provided, validate it belongs to user and get container info
+        let sourceProject = null;
+        let containerName = null;
+
+        if (sourceProjectId) {
+            sourceProject = await prisma.project.findUnique({
+                where: { id: sourceProjectId }
+            });
+
+            if (!sourceProject || sourceProject.userId !== req.user.id) {
+                return res.status(404).json({ error: "Source project not found" });
+            }
+
+            // The container name is the project's slug
+            if (!sourceProject.slug) {
+                return res.status(400).json({ error: "Source project must be deployed first" });
+            }
+
+            containerName = sourceProject.slug;
+
+            // Verify the file exists in the container
+            const fileExists = await checkSQLiteFileExists(containerName, filePath);
+            if (!fileExists) {
+                return res.status(400).json({
+                    error: `SQLite file not found at path: ${filePath}`
+                });
+            }
+        }
+
+        // Generate name if not provided
+        const trimmedName = name ? String(name).trim() :
+            (uploadedFileName ? uploadedFileName.replace(/\.db$/i, '') :
+            `sqlite-${generateShortId()}`);
+
+        if (trimmedName.length < 2 || trimmedName.length > 40) {
+            return res.status(400).json({ error: "Name must be 2-40 characters" });
+        }
+
+        // For SQLite, we use placeholder values for container-related fields
+        const placeholderContainerName = `sqlite-${generateShortId()}`;
+
+        // Create database record
+        const database = await prisma.database.create({
+            data: {
+                userId: req.user.id,
+                groupId: groupId || null,
+                name: trimmedName,
+                containerName: placeholderContainerName, // Placeholder for SQLite
+                type: 'SQLITE',
+                version: '3',
+                dbName: trimmedName, // Database name is the file name
+                dbUsername: 'sqlite', // Placeholder
+                dbPasswordEncrypted: encryptSecret(''), // No password for SQLite
+                rootPasswordEncrypted: encryptSecret(''),
+                host: containerName || 'localhost', // Store the source container name
+                port: 0, // SQLite doesn't use a port
+                status: 'RUNNING', // SQLite is always "running" if file exists
+                volumeName: '', // No volume for SQLite
+                diskUsageMB: 0,
+                linkedProjectId: null,
+                filePath: filePath || null,
+                sourceProjectId: sourceProjectId || null,
+                uploadedFileName: uploadedFileName || null
+            }
+        });
+
+        // Get initial stats if possible
+        if (containerName && filePath) {
+            try {
+                const stats = await getSQLiteStats(containerName, filePath);
+                if (stats.diskUsageMB > 0) {
+                    await prisma.database.update({
+                        where: { id: database.id },
+                        data: { diskUsageMB: stats.diskUsageMB }
+                    });
+                }
+            } catch (e) {
+                // Stats are optional, continue
+            }
+        }
+
+        res.json({
+            success: true,
+            database: {
+                id: database.id,
+                name: trimmedName,
+                type: 'SQLITE',
+                version: '3',
+                status: 'RUNNING',
+                filePath: filePath || null,
+                sourceProjectId: sourceProjectId || null,
+                uploadedFileName: uploadedFileName || null,
+                connectionUrl: filePath ? `sqlite://${filePath}` : null
+            }
+        });
+
+    } catch (err) {
+        if (err.code === 'P2002') {
+            return res.status(400).json({ error: "Database name already exists" });
+        }
+        console.error(err);
+        res.status(500).json({
+            error: "Failed to create SQLite database",
+            details: err.message
+        });
+    }
 }
 
 // ============================================
@@ -176,6 +322,23 @@ router.get("/", authRequired, async (req, res) => {
         // Update status and mask passwords
         const databasesWithStatus = await Promise.all(
             databases.map(async (db) => {
+                // SQLite doesn't have a container - check if source project container exists
+                if (db.type === 'SQLITE') {
+                    // For SQLite, status is based on whether the source project container is running
+                    let sqliteStatus = db.status;
+                    if (db.sourceProjectId) {
+                        const sourceProject = await prisma.project.findUnique({
+                            where: { id: db.sourceProjectId },
+                            select: { slug: true }
+                        });
+                        if (sourceProject && sourceProject.slug) {
+                            const containerStatus = await getContainerStatus(sourceProject.slug);
+                            sqliteStatus = containerStatus === 'running' ? 'RUNNING' : 'STOPPED';
+                        }
+                    }
+                    return sanitizeDatabase({ ...db, status: sqliteStatus }, { includeProvisioning: false });
+                }
+
                 const status = await getContainerStatus(db.containerName);
                 const prismaStatus = status === 'running' ? 'RUNNING' :
                     status === 'exited' ? 'STOPPED' : db.status;
@@ -231,10 +394,15 @@ router.get("/:id", authRequired, async (req, res) => {
 
 // POST /api/databases - Create new database
 router.post("/", authRequired, async (req, res) => {
-    const { name, type, projectId, groupId } = req.body;
+    const { name, type, projectId, groupId, sourceProjectId, filePath, uploadedFileName } = req.body;
 
-    if (!type || !['MYSQL', 'POSTGRES', 'MONGODB'].includes(type)) {
-        return res.status(400).json({ error: "Valid database type is required (MYSQL, POSTGRES, MONGODB)" });
+    if (!type || !['MYSQL', 'POSTGRES', 'MONGODB', 'SQLITE'].includes(type)) {
+        return res.status(400).json({ error: "Valid database type is required (MYSQL, POSTGRES, MONGODB, SQLITE)" });
+    }
+
+    // Handle SQLite creation separately
+    if (type === 'SQLITE') {
+        return createSQLiteDatabase(req, res, { name, sourceProjectId, filePath, uploadedFileName, groupId });
     }
 
     let createdDatabaseId = null;
@@ -831,7 +999,51 @@ router.get("/:id/stats", authRequired, async (req, res) => {
             return res.status(404).json({ error: "Database not found" });
         }
 
-        const stats = await getDatabaseStats(database.containerName, database.type);
+        let stats;
+        let tableCount = 0;
+
+        if (database.type === 'SQLITE') {
+            // For SQLite, get stats from the source project container
+            if (!database.sourceProjectId || !database.filePath) {
+                return res.json({
+                    diskUsageMB: 0,
+                    tableCount: 0,
+                    uptime: 0,
+                    connections: 0
+                });
+            }
+            const sourceProject = await prisma.project.findUnique({
+                where: { id: database.sourceProjectId },
+                select: { slug: true }
+            });
+            if (!sourceProject || !sourceProject.slug) {
+                return res.json({
+                    diskUsageMB: 0,
+                    tableCount: 0,
+                    uptime: 0,
+                    connections: 0
+                });
+            }
+            stats = await getSQLiteStats(sourceProject.slug, database.filePath);
+            tableCount = stats.tableCount || 0;
+        } else {
+            stats = await getDatabaseStats(database.containerName, database.type);
+
+            // Get table count
+            try {
+                const dbPassword = await getDbPasswordPlain(database);
+                const tables = await listTables(
+                    database.containerName,
+                    database.type,
+                    database.dbName,
+                    database.dbUsername,
+                    dbPassword
+                );
+                tableCount = tables.length;
+            } catch {
+                // Ignore table count errors
+            }
+        }
 
         // Update disk usage in database
         if (stats.diskUsageMB > 0) {
@@ -841,27 +1053,11 @@ router.get("/:id/stats", authRequired, async (req, res) => {
             });
         }
 
-        // Get table count
-        let tableCount = 0;
-        try {
-            const dbPassword = await getDbPasswordPlain(database);
-            const tables = await listTables(
-                database.containerName,
-                database.type,
-                database.dbName,
-                database.dbUsername,
-                dbPassword
-            );
-            tableCount = tables.length;
-        } catch {
-            // Ignore table count errors
-        }
-
         res.json({
             diskUsageMB: stats.diskUsageMB,
             tableCount,
-            uptime: stats.uptime,
-            connections: stats.connections
+            uptime: stats.uptime || 0,
+            connections: stats.connections || 0
         });
     } catch (err) {
         console.error(err);
@@ -905,10 +1101,10 @@ router.post("/:id/query", authRequired, async (req, res) => {
             data: { lastAccessedAt: new Date() }
         });
 
-        const dbPassword = await getDbPasswordPlain(database);
         let result;
         switch (database.type) {
-            case 'MYSQL':
+            case 'MYSQL': {
+                const dbPassword = await getDbPasswordPlain(database);
                 result = await executeMySQLQuery(
                     database.containerName,
                     database.dbName,
@@ -917,7 +1113,9 @@ router.post("/:id/query", authRequired, async (req, res) => {
                     query
                 );
                 break;
-            case 'POSTGRES':
+            }
+            case 'POSTGRES': {
+                const dbPassword = await getDbPasswordPlain(database);
                 result = await executePostgresQuery(
                     database.containerName,
                     database.dbName,
@@ -926,6 +1124,22 @@ router.post("/:id/query", authRequired, async (req, res) => {
                     query
                 );
                 break;
+            }
+            case 'SQLITE': {
+                // For SQLite, we need the source container name
+                if (!database.sourceProjectId || !database.filePath) {
+                    return res.status(400).json({ error: "SQLite database not properly configured" });
+                }
+                const sourceProject = await prisma.project.findUnique({
+                    where: { id: database.sourceProjectId },
+                    select: { slug: true }
+                });
+                if (!sourceProject || !sourceProject.slug) {
+                    return res.status(400).json({ error: "Source project not found or not deployed" });
+                }
+                result = await executeSQLiteQuery(sourceProject.slug, database.filePath, query);
+                break;
+            }
             case 'MONGODB':
                 return res.status(400).json({ error: "MongoDB query execution not supported yet" });
             default:
@@ -950,14 +1164,30 @@ router.get("/:id/tables", authRequired, async (req, res) => {
             return res.status(404).json({ error: "Database not found" });
         }
 
-        const dbPassword = await getDbPasswordPlain(database);
-        const tables = await listTables(
-            database.containerName,
-            database.type,
-            database.dbName,
-            database.dbUsername,
-            dbPassword
-        );
+        let tables;
+        if (database.type === 'SQLITE') {
+            // For SQLite, get tables from the source project container
+            if (!database.sourceProjectId || !database.filePath) {
+                return res.status(400).json({ error: "SQLite database not properly configured" });
+            }
+            const sourceProject = await prisma.project.findUnique({
+                where: { id: database.sourceProjectId },
+                select: { slug: true }
+            });
+            if (!sourceProject || !sourceProject.slug) {
+                return res.status(400).json({ error: "Source project not found or not deployed" });
+            }
+            tables = await listSQLiteTables(sourceProject.slug, database.filePath);
+        } else {
+            const dbPassword = await getDbPasswordPlain(database);
+            tables = await listTables(
+                database.containerName,
+                database.type,
+                database.dbName,
+                database.dbUsername,
+                dbPassword
+            );
+        }
 
         res.json({ tables: tables.map(name => ({ name })) });
     } catch (err) {
@@ -977,15 +1207,30 @@ router.get("/:id/tables/:tableName", authRequired, async (req, res) => {
             return res.status(404).json({ error: "Database not found" });
         }
 
-        const dbPassword = await getDbPasswordPlain(database);
-        const schema = await getTableSchema(
-            database.containerName,
-            database.type,
-            database.dbName,
-            req.params.tableName,
-            database.dbUsername,
-            dbPassword
-        );
+        let schema;
+        if (database.type === 'SQLITE') {
+            if (!database.sourceProjectId || !database.filePath) {
+                return res.status(400).json({ error: "SQLite database not properly configured" });
+            }
+            const sourceProject = await prisma.project.findUnique({
+                where: { id: database.sourceProjectId },
+                select: { slug: true }
+            });
+            if (!sourceProject || !sourceProject.slug) {
+                return res.status(400).json({ error: "Source project not found or not deployed" });
+            }
+            schema = await getSQLiteTableSchema(sourceProject.slug, database.filePath, req.params.tableName);
+        } else {
+            const dbPassword = await getDbPasswordPlain(database);
+            schema = await getTableSchema(
+                database.containerName,
+                database.type,
+                database.dbName,
+                req.params.tableName,
+                database.dbUsername,
+                dbPassword
+            );
+        }
 
         res.json({ tableName: req.params.tableName, ...schema });
     } catch (err) {
@@ -1011,6 +1256,7 @@ router.get("/:id/tables/:tableName/rows", authRequired, async (req, res) => {
 
         const tableName = req.params.tableName;
         let query = '';
+        let result;
 
         switch (database.type) {
             case 'MYSQL':
@@ -1019,28 +1265,44 @@ router.get("/:id/tables/:tableName/rows", authRequired, async (req, res) => {
             case 'POSTGRES':
                 query = `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`;
                 break;
+            case 'SQLITE':
+                query = `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset}`;
+                break;
             default:
                 return res.status(400).json({ error: "Unsupported database type" });
         }
 
-        let result;
-        const dbPassword = await getDbPasswordPlain(database);
-        if (database.type === 'MYSQL') {
-            result = await executeMySQLQuery(
-                database.containerName,
-                database.dbName,
-                database.dbUsername,
-                dbPassword,
-                query
-            );
+        if (database.type === 'SQLITE') {
+            if (!database.sourceProjectId || !database.filePath) {
+                return res.status(400).json({ error: "SQLite database not properly configured" });
+            }
+            const sourceProject = await prisma.project.findUnique({
+                where: { id: database.sourceProjectId },
+                select: { slug: true }
+            });
+            if (!sourceProject || !sourceProject.slug) {
+                return res.status(400).json({ error: "Source project not found or not deployed" });
+            }
+            result = await executeSQLiteQuery(sourceProject.slug, database.filePath, query);
         } else {
-            result = await executePostgresQuery(
-                database.containerName,
-                database.dbName,
-                database.dbUsername,
-                dbPassword,
-                query
-            );
+            const dbPassword = await getDbPasswordPlain(database);
+            if (database.type === 'MYSQL') {
+                result = await executeMySQLQuery(
+                    database.containerName,
+                    database.dbName,
+                    database.dbUsername,
+                    dbPassword,
+                    query
+                );
+            } else {
+                result = await executePostgresQuery(
+                    database.containerName,
+                    database.dbName,
+                    database.dbUsername,
+                    dbPassword,
+                    query
+                );
+            }
         }
 
         if (!result.success) {

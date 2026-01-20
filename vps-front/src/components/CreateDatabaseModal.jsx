@@ -17,6 +17,12 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
     const [redeployMsg, setRedeployMsg] = useState("");
     const [backendProject, setBackendProject] = useState(null);
 
+    // SQLite-specific state
+    const [userProjects, setUserProjects] = useState([]);
+    const [selectedSourceProject, setSelectedSourceProject] = useState("");
+    const [sqliteFilePath, setSqliteFilePath] = useState("");
+    const [loadingProjects, setLoadingProjects] = useState(false);
+
     // For group-based flow, fetch the backend project (if any) for auto-linking env vars
     useEffect(() => {
         if (groupId) {
@@ -31,9 +37,33 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
         }
     }, [groupId]);
 
+    // Fetch user projects when SQLite is selected
+    useEffect(() => {
+        if (type === 'SQLITE') {
+            setLoadingProjects(true);
+            apiFetch('/projects', { token: getToken() })
+                .then(res => {
+                    // Filter for projects that are deployed or have a backend
+                    setUserProjects((res.projects || []).filter(p => p.role !== 'FRONTEND'));
+                })
+                .catch(console.error)
+                .finally(() => setLoadingProjects(false));
+        }
+    }, [type]);
+
     const handleCreate = async () => {
         if (!name.trim()) {
             setError("Name is required");
+            return;
+        }
+
+        if (type === 'SQLITE' && !selectedSourceProject) {
+            setError("Please select a source project for the SQLite file");
+            return;
+        }
+
+        if (type === 'SQLITE' && !sqliteFilePath.trim()) {
+            setError("File path is required (e.g., ./data/db.sqlite)");
             return;
         }
 
@@ -48,12 +78,19 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
                 type
             };
 
+            if (type === 'SQLITE') {
+                body.sourceProjectId = selectedSourceProject;
+                body.filePath = sqliteFilePath.trim();
+            }
+
             // Group-based flow: link to project group
             if (groupId) {
                 body.groupId = groupId;
             }
 
             // If there's a backend project, link DATABASE_URL to it
+            // For SQLite, we might not want to overwrite DATABASE_URL if it's just a file reference,
+            // but the backend handles connectionUrl generation (sqlite://path), so it's consistent.
             if (backendProject?.id) {
                 body.projectId = backendProject.id;
             }
@@ -456,17 +493,19 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
                     <label style={{ display: "block", marginBottom: 6, fontWeight: 500 }}>
                         Database Type *
                     </label>
-                    <div style={{ display: "flex", gap: 10 }}>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                         {[
                             { value: 'MYSQL', label: 'MySQL 8.0', icon: '🐬' },
                             { value: 'POSTGRES', label: 'PostgreSQL 15', icon: '🐘' },
-                            { value: 'MONGODB', label: 'MongoDB 7', icon: '🍃' }
+                            { value: 'MONGODB', label: 'MongoDB 7', icon: '🍃' },
+                            { value: 'SQLITE', label: 'SQLite', icon: '📦' }
                         ].map(opt => (
                             <button
                                 key={opt.value}
                                 onClick={() => setType(opt.value)}
                                 style={{
                                     flex: 1,
+                                    minWidth: "80px",
                                     padding: 12,
                                     borderRadius: 8,
                                     border: type === opt.value ? "2px solid #2196F3" : "1px solid #ddd",
@@ -484,6 +523,47 @@ export default function CreateDatabaseModal({ onClose, onCreated, onSuccess, gro
                         ))}
                     </div>
                 </div>
+
+                {type === 'SQLITE' && (
+                    <div style={{ padding: 16, background: "#f5f5f5", borderRadius: 8, marginBottom: 20 }}>
+                        <h4 style={{ margin: "0 0 12px 0", fontSize: "0.95em" }}>SQLite Configuration</h4>
+                        
+                        <div style={{ marginBottom: 12 }}>
+                            <label style={{ display: "block", fontSize: "0.85em", marginBottom: 4 }}>
+                                Source Project (where the .db file lives)
+                            </label>
+                            {loadingProjects ? (
+                                <div style={{ fontSize: "0.85em", color: "#666" }}>Loading projects...</div>
+                            ) : (
+                                <select 
+                                    value={selectedSourceProject} 
+                                    onChange={e => setSelectedSourceProject(e.target.value)}
+                                    style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #ddd" }}
+                                >
+                                    <option value="">Select a project...</option>
+                                    {userProjects.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name} ({p.deployType})</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+
+                        <div style={{ marginBottom: 4 }}>
+                            <label style={{ display: "block", fontSize: "0.85em", marginBottom: 4 }}>
+                                File Path (relative to project root)
+                            </label>
+                            <input 
+                                value={sqliteFilePath} 
+                                onChange={e => setSqliteFilePath(e.target.value)}
+                                placeholder="./data/db.sqlite"
+                                style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #ddd", fontFamily: "monospace" }}
+                            />
+                        </div>
+                        <p style={{ fontSize: "0.75em", color: "#666", marginTop: 4 }}>
+                            Ensure this file exists in your deployed project.
+                        </p>
+                    </div>
+                )}
 
                 {/* Project linking info - show differently based on flow */}
                 {groupId ? (

@@ -80,6 +80,7 @@ export default function Databases() {
             case 'MYSQL': return '🐬';
             case 'POSTGRES': return '🐘';
             case 'MONGODB': return '🍃';
+            case 'SQLITE': return '📦';
             default: return '🗄️';
         }
     };

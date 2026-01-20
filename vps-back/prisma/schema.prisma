@@ -158,6 +158,7 @@ enum DatabaseType {
   MYSQL
   POSTGRES
   MONGODB
+  SQLITE
 }
 
 enum DatabaseStatus {
@@ -198,6 +199,11 @@ model Database {
   volumeName    String   // Docker volume name for persistence
   diskUsageMB   Int      @default(0) // Storage used in MB
   linkedProjectId String? // Optional denormalized link (keep in sync with Project.databaseId)
+
+  // SQLite-specific fields (only used when type = SQLITE)
+  filePath          String?   // Path to the .db file (within project or uploaded location)
+  sourceProjectId   String?   // If SQLite file is inside a deployed project
+  uploadedFileName  String?   // Original filename if uploaded by user
 
   // Provisioning / Error Diagnostics
   lastError         String?
