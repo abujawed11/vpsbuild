@@ -50,12 +50,8 @@ export default function FileManagerModal({
         requestAnimationFrame(() => setIsVisible(true));
     }, []);
 
-    useEffect(() => {
-        // Reset path when switching modes
-        if (viewMode === "container") setCurrentPath(".");
-        else if (viewMode === "workspace") setCurrentPath(initialPath || "");
-        else if (viewMode === "storage") setCurrentPath(storageFolder);
-    }, [viewMode, initialPath, storageFolder]);
+    // Removed useEffect that auto-reset path on viewMode change to avoid race conditions.
+    // Path handling is now done in the toggle buttons.
 
     useEffect(() => {
         fetchFiles(currentPath, items.length === 0);
@@ -375,7 +371,10 @@ export default function FileManagerModal({
                     {!storageMode && (
                         <div style={{ display: "flex", background: "#f5f5f5", padding: 4, borderRadius: 8, marginRight: 20 }}>
                             <button
-                                onClick={() => setViewMode("workspace")}
+                                onClick={() => {
+                                    setViewMode("workspace");
+                                    setCurrentPath(initialPath || "");
+                                }}
                                 style={{
                                     padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: "0.9em", fontWeight: 500,
                                     background: viewMode === "workspace" ? "white" : "transparent",
@@ -386,7 +385,10 @@ export default function FileManagerModal({
                                 Source Code
                             </button>
                             <button
-                                onClick={() => setViewMode("container")}
+                                onClick={() => {
+                                    setViewMode("container");
+                                    setCurrentPath(".");
+                                }}
                                 style={{
                                     padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: "0.9em", fontWeight: 500,
                                     background: viewMode === "container" ? "white" : "transparent",
